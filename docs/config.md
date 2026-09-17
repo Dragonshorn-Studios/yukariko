@@ -176,6 +176,15 @@ Commands are argv lists executed by the controlled runner (issue #4) — no
 shell interpretation. `shell: true` on a step opts into shell execution and
 is documented as a deliberate risk. All steps are optional.
 
+!!! **Stateful applications and major updates: back up first.** A Compose
+deployment runs `pull` (registry apps) and `up -d --wait` in place. For
+stateful applications — databases, Ghost, anything with schema migrations —
+a major-version update can migrate data irreversibly, and Yukariko has no
+rollback path by design: it never redeploys an older version automatically.
+Use a `pre` step (as in the Ghost example above) to take a backup before
+every deploy, and prefer pinned versions you have reviewed over floating
+tags for such apps.
+
 ### `health` — post-deploy checks and monitoring
 
 ```yaml
