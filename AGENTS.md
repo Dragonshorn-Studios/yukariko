@@ -29,17 +29,18 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#9):
+Current (#10):
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, `learn` command, command stubs
 - `internal/config` — strict YAML schema, defaults, path-aware validation, round-trippable rendering
 - `internal/store` — SQLite state/event store, forward-only migrations
-- `internal/runner` — argv-based controlled command runner with redaction
+- `internal/runner` — argv-based controlled command runner with redaction, bounded stdin support
 - `internal/docker` — read-only Docker discovery, Compose project grouping
 - `internal/git` — branch change detection, fast-forward-only worktree preparation
 - `internal/learn` — proposals + interactive import flow (diff, merge, backup, atomic write)
 - `internal/schedule` — per-app loops, state machine, locks, backoff, preflight
+- `internal/registry` — OCI/Distribution digest resolution (auth, platform, typed errors)
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
@@ -47,7 +48,7 @@ Reserved packages (create only when the owning issue lands):
 
 | Package | Issue |
 |---|---|
-| `internal/registry` | #10 |
+| `internal/deploy` | #11–#12 |
 | `internal/git` | #9 |
 | `internal/registry` | #10 |
 | `internal/deploy` | #11–#12 |
@@ -102,6 +103,7 @@ wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukar
 - Config merge ownership (`#7`): learn owns `source` + `deploy` only; a user's `interval`, `timeout`, `retry`, `steps`, `health`, `enabled`, and `display_name` always survive a merge. Rendering uses `config.DecodeRaw` + omitempty so defaults the user never wrote are never materialized into the file; generated documents must pass `config.Parse` before the original is touched. Writes go backup → temp → validate → atomic rename; declining or failing leaves the original byte-identical.
 - Scheduler control plane (`#8`): one loop goroutine per app; a global semaphore caps concurrent check→deploy passes (default 2); a keyed per-app lock serializes scheduled and manual passes (scheduled = try-and-skip, manual = queue with timeout). The explicit state machine (`idle/checking/preflight/deploying/postchecks/succeeded/failed/backoff/interrupted`) lives in `internal/schedule`; transitions are validated and every outcome is an event for the #3 store. Cancellation marks a pass interrupted and can never record success, so a cancelled pass cannot advance the deployed version. Timing goes through the injectable `Clock`; jitter (default ≤ 1/10) applies to intervals and backoff (`retry.base/max`). Source checks and deployments are `Checker`/`Deployer` seams implemented by #9–#12; preflight gates deployment (binaries, Docker reachability, compose/git context, secret-ref resolvability, data-dir writability) while observation stays available. Reporting is never on the critical path.
 - Git update policy (`#9`): `internal/git` polls `ls-remote`, fetches only when the remote is actually ahead (fetch updates remote-tracking refs, never the worktree), and prepares deployments with `merge --ff-only` after re-validating dirty/detached/diverged conditions. `git reset --hard` and every lossy or history-rewriting command are forbidden — divergence is blocked with an actionable reason, never auto-resolved. The observed SHA is informational; only the deploy pipeline's success checkpoint (#11) advances the deployed SHA. Remote URLs never enter results: details name remotes by configured name, and command output is runner-redacted before use.
+- Registry resolution (`#10`): `internal/registry` speaks OCI/Distribution v2 over stdlib HTTP — no registry SDK. Docker Hub aliases normalize onto registry-1.docker.io; loopback registries use plain http; everything else is https. Auth is Docker's own token flow with credentials delegated to `~/.docker/config.json` (`auths`, `credsStore`, `credHelpers` → `docker-credential-*` over the runner with bounded stdin); credentials live in memory only and never reach YAML, SQLite, logs, or errors. Token realms must be https or loopback http — an injected challenge can never redirect credentials. Manifest bodies are digest-verified against `Docker-Content-Digest` (mismatch = malformed); multi-arch indexes resolve to the deterministic platform digest (`os/arch[/variant]`). Failures are typed and carry a Retryable flag for the #8 backoff; the resolver never retries internally and never pulls images — a successful lookup is never a deployed version.
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.
