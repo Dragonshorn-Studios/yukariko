@@ -218,13 +218,18 @@ func TestDeployDispatcherCommitsAndFailsTransactionally(t *testing.T) {
 	}
 }
 
-func TestAssembleRefusesServerEnabled(t *testing.T) {
+func TestAssembleBuildsAPIWhenEnabled(t *testing.T) {
 	t.Parallel()
 	cfg := &config.Config{
 		SchemaVersion: 1,
 		Server:        config.Server{Enabled: true},
 	}
-	if _, err := Assemble(context.Background(), Options{Config: cfg, DataDir: t.TempDir()}); err == nil {
-		t.Fatal("server.enabled must hit the explicit #15 stub")
+	asm, err := Assemble(context.Background(), Options{Config: cfg, DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	defer asm.Store.Close()
+	if !asm.APIOn || asm.API == nil || asm.APIBind == "" {
+		t.Errorf("API = %+v bind = %q, want the read-only server wired", asm.API, asm.APIBind)
 	}
 }

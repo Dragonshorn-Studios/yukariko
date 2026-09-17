@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sort"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/config"
 	"github.com/Dragonshorn-Studios/yukariko/internal/daemon"
+	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 )
 
 // defaultDataDir is where the durable store lives when --data-dir is unset.
@@ -74,6 +77,16 @@ func (a *App) newRunCommand() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "yukariko daemon running (data dir %s); Docker and Compose directories remain the source of truth.\n", opts.DataDir)
+			if asm.APIOn {
+				ln, err := net.Listen("tcp", asm.APIBind)
+				if err != nil {
+					return fmt.Errorf("bind %s: %w", asm.APIBind, err)
+				}
+				srv := &http.Server{Handler: asm.API.Handler(), ReadHeaderTimeout: 5 * time.Second}
+				go func() { _ = srv.Serve(ln) }()
+				defer srv.Close()
+				fmt.Fprintf(out, "read-only API on http://%s (GET/HEAD only).\n", asm.APIBind)
+			}
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
@@ -279,9 +292,9 @@ recorded observations.`,
 			defer asm.Store.Close()
 			ctx := cmd.Context()
 
-			var rows []daemon.AppStatus
+			var rows []state.AppStatus
 			for _, app := range appsSlice(asm.Config) {
-				row, err := daemon.StatusRow(ctx, asm.Store, app, time.Now())
+				row, err := state.StatusRow(ctx, asm.Store, app, time.Now())
 				if err != nil {
 					return err
 				}
@@ -329,7 +342,7 @@ func (a *App) newLogsCommand() *cobra.Command {
 			}
 			defer asm.Store.Close()
 
-			events, err := daemon.EventsFor(cmd.Context(), asm.Store, appID, level, limit, since)
+			events, err := state.EventsFor(cmd.Context(), asm.Store, appID, level, limit, since)
 			if err != nil {
 				return err
 			}

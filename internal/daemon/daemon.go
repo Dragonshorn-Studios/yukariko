@@ -21,11 +21,13 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/docker"
 	"github.com/Dragonshorn-Studios/yukariko/internal/git"
 	"github.com/Dragonshorn-Studios/yukariko/internal/health"
+	"github.com/Dragonshorn-Studios/yukariko/internal/httpapi"
 	"github.com/Dragonshorn-Studios/yukariko/internal/registry"
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
 	"os"
 
+	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 )
 
@@ -57,6 +59,11 @@ type Assembled struct {
 	Monitor   *health.Monitor
 	Preflight *schedule.Preflight
 	Docker    docker.Client
+	// API is non-nil when the configuration enables the read-only HTTP
+	// server; the daemon serves it on APIBind.
+	API     *httpapi.Server
+	APIBind string
+	APIOn   bool
 }
 
 // Assemble opens the store, builds every component, and wires the
@@ -64,9 +71,6 @@ type Assembled struct {
 func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	if opts.Config == nil || opts.DataDir == "" {
 		return nil, errors.New("daemon: config and data dir are required")
-	}
-	if opts.Config.Server.Enabled {
-		return nil, errors.New("HTTP server is not implemented yet (issue #15); set server.enabled: false")
 	}
 	if err := os.MkdirAll(opts.DataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
@@ -133,6 +137,15 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Service: healthSvc,
 		Sink:    &healthSink{store: st},
 	}
+	var api *httpapi.Server
+	apiBind := ""
+	if opts.Config.Server.Enabled {
+		apiBind = opts.Config.Server.Bind
+		if apiBind == "" {
+			apiBind = config.DefaultServerBind
+		}
+		api = &httpapi.Server{Store: st, Config: opts.Config}
+	}
 	return &Assembled{
 		Config:    opts.Config,
 		Store:     st,
@@ -143,6 +156,9 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Monitor:   monitor,
 		Preflight: schedOpts.Preflight,
 		Docker:    dockerClient,
+		API:       api,
+		APIBind:   apiBind,
+		APIOn:     api != nil,
 	}, nil
 }
 
@@ -207,16 +223,7 @@ func (c *SourceChecker) Check(ctx context.Context, app *config.App) (schedule.Ch
 }
 
 // parseDigestVersion splits the stored "ref@digest,ref@digest" identity.
-func parseDigestVersion(version string) map[string]string {
-	out := map[string]string{}
-	for _, pair := range strings.Split(version, ",") {
-		ref, digest, ok := strings.Cut(pair, "@")
-		if ok {
-			out[ref] = digest
-		}
-	}
-	return out
-}
+func parseDigestVersion(version string) map[string]string { return state.ParseDigestVersion(version) }
 
 // --- deployment dispatch ----------------------------------------------------
 

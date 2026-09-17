@@ -1,6 +1,7 @@
-// Daemon-level helpers shared by the CLI commands: status rows, log query
-// shaping, and version-kind selection.
-package daemon
+// Package state projects the durable store into the read-only views used by
+// the CLI status command, the HTTP API, and the dashboard: per-app status
+// rows, version kinds, and bounded log reads.
+package state
 
 import (
 	"context"
@@ -112,11 +113,24 @@ func pending(rawDeployed string, deployedOK bool, rawObserved string, observedOK
 	}
 	if app.Source.Mode == config.SourceRegistry && app.Source.Registry != nil && len(app.Source.Registry.Images) > 0 {
 		if ref, err := registry.ParseRef(app.Source.Registry.Images[0].Ref); err == nil {
-			deployedDigest := parseDigestVersion(rawDeployed)[ref.String()]
+			deployedDigest := ParseDigestVersion(rawDeployed)[ref.String()]
 			return deployedDigest != rawObserved
 		}
 	}
 	return rawDeployed != rawObserved
+}
+
+// ParseDigestVersion splits the stored "ref@digest,ref@digest" identity
+// into its per-reference digests.
+func ParseDigestVersion(version string) map[string]string {
+	out := map[string]string{}
+	for _, pair := range strings.Split(version, ",") {
+		ref, digest, ok := strings.Cut(pair, "@")
+		if ok {
+			out[ref] = digest
+		}
+	}
+	return out
 }
 
 // summarizeState renders the human verdict: failed > pending > healthy or
