@@ -98,13 +98,20 @@ type inspectDoc struct {
 	Created string `json:"Created"`
 	Image   string `json:"Image"`
 	Config  struct {
-		Image      string            `json:"Image"`
-		User       string            `json:"User"`
-		WorkingDir string            `json:"WorkingDir"`
-		Cmd        []string          `json:"Cmd"`
-		Entrypoint []string          `json:"Entrypoint"`
-		Env        []string          `json:"Env"`
-		Labels     map[string]string `json:"Labels"`
+		Image       string            `json:"Image"`
+		User        string            `json:"User"`
+		WorkingDir  string            `json:"WorkingDir"`
+		Cmd         []string          `json:"Cmd"`
+		Entrypoint  []string          `json:"Entrypoint"`
+		Env         []string          `json:"Env"`
+		Labels      map[string]string `json:"Labels"`
+		Healthcheck *struct {
+			Test        []string `json:"Test"`
+			Interval    int64    `json:"Interval"`
+			Timeout     int64    `json:"Timeout"`
+			Retries     int      `json:"Retries"`
+			StartPeriod int64    `json:"StartPeriod"`
+		} `json:"Healthcheck"`
 	} `json:"Config"`
 	State struct {
 		Status     string `json:"Status"`
@@ -122,6 +129,9 @@ type inspectDoc struct {
 			MaximumRetryCount int    `json:"MaximumRetryCount"`
 		} `json:"RestartPolicy"`
 		NetworkMode string `json:"NetworkMode"`
+		Privileged  bool   `json:"Privileged"`
+		PidMode     string `json:"PidMode"`
+		IpcMode     string `json:"IpcMode"`
 	} `json:"HostConfig"`
 	Mounts []struct {
 		Type        string `json:"Type"`
@@ -184,6 +194,9 @@ func (d *inspectDoc) detail() ContainerDetail {
 		RestartPolicy:   d.HostConfig.RestartPolicy.Name,
 		RestartMaxRetry: d.HostConfig.RestartPolicy.MaximumRetryCount,
 		NetworkMode:     d.HostConfig.NetworkMode,
+		Privileged:      d.HostConfig.Privileged,
+		PidMode:         d.HostConfig.PidMode,
+		IpcMode:         d.HostConfig.IpcMode,
 		State:           d.State.Status,
 		Running:         d.State.Running,
 		Paused:          d.State.Paused,
@@ -211,6 +224,16 @@ func (d *inspectDoc) detail() ContainerDetail {
 		if h.Status == "" {
 			det.Anomalies = append(det.Anomalies, "healthcheck configured but status missing")
 		}
+	}
+	if hc := d.Config.Healthcheck; hc != nil {
+		def := &HealthCheckDef{
+			Test:          copyStrings(hc.Test),
+			IntervalNS:    hc.Interval,
+			TimeoutNS:     hc.Timeout,
+			StartPeriodNS: hc.StartPeriod,
+			Retries:       hc.Retries,
+		}
+		det.HealthCheck = def
 	}
 	for _, entry := range d.Config.Env {
 		name, _, hasValue := strings.Cut(entry, "=")
