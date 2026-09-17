@@ -101,6 +101,13 @@ func (a *App) newRunCommand() *cobra.Command {
 				defer wg.Done()
 				asm.Monitor.Run(ctx, appsSlice(asm.Config))
 			}()
+			if asm.Reporter != nil {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					asm.Reporter.Run(ctx)
+				}()
+			}
 			runErr := asm.Scheduler.Run(ctx)
 			wg.Wait()
 			if runErr == nil {
