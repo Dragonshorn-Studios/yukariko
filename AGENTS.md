@@ -29,15 +29,15 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#6):
+Current (#7):
 
 - `cmd/yukariko` — process entry, signal context, process exit
-- `internal/cli` — cobra routing, global flags, command stubs
-- `internal/config` — strict YAML schema, defaults, path-aware validation
+- `internal/cli` — cobra routing, global flags, `learn` command, command stubs
+- `internal/config` — strict YAML schema, defaults, path-aware validation, round-trippable rendering
 - `internal/store` — SQLite state/event store, forward-only migrations
 - `internal/runner` — argv-based controlled command runner with redaction
 - `internal/docker` — read-only Docker discovery, Compose project grouping
-- `internal/learn` — discovery → reviewable proposals; uncertain values block import
+- `internal/learn` — proposals + interactive import flow (diff, merge, backup, atomic write)
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
@@ -97,6 +97,7 @@ wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukar
 - Stdlib first. Cobra is the CLI router only; do not add Viper. YAML parsing is `gopkg.in/yaml.v3` with `KnownFields(true)` strict decoding (`internal/config`); keep it the only YAML dependency. SQLite runs on `modernc.org/sqlite` (pure Go, no cgo) behind `database/sql` (`internal/store`): WAL, busy timeout, forward-only migrations recorded in `schema_migrations` — never edit an applied migration, append a new one.
 - Docker access is CLI-only (`#5`): `internal/docker` builds `docker ps` / `docker inspect` argv and executes them through `internal/runner`; no Docker SDK or socket dependency, now or later. Discovery records environment-variable **names only** — inspect values must never enter results, logs, or storage — and the runner used for discovery must not attach a persistence `Sink`. Docker daemon access is host-equivalent privilege; see `docs/docker-access.md`.
 - Learn classification is deterministic and side-effect free (`#6`): its only host interaction is read-only Git probing (`git rev-parse`, `git remote get-url`) at a Compose project's declared working directory — never an arbitrary disk scan. Proposals carry evidence + confirmations: uncertain values block import, and standalone specs with unsupported semantics (privileged, shared namespaces, anonymous volumes, one-offs) refuse auto-import. Remote URLs are credential-stripped before entering a proposal.
+- Config merge ownership (`#7`): learn owns `source` + `deploy` only; a user's `interval`, `timeout`, `retry`, `steps`, `health`, `enabled`, and `display_name` always survive a merge. Rendering uses `config.DecodeRaw` + omitempty so defaults the user never wrote are never materialized into the file; generated documents must pass `config.Parse` before the original is touched. Writes go backup → temp → validate → atomic rename; declining or failing leaves the original byte-identical.
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.

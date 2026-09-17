@@ -4,11 +4,11 @@ package config
 // success transaction) and independent periodic monitoring (issue #13).
 // Health state never triggers restarts or rollbacks.
 type Health struct {
-	Required *bool        `yaml:"required"`
-	Interval Duration     `yaml:"interval"`
-	HTTP     *HTTPProbe   `yaml:"http"`
-	Docker   *DockerProbe `yaml:"docker"`
-	Command  []string     `yaml:"command"`
+	Required *bool        `yaml:"required,omitempty"`
+	Interval Duration     `yaml:"interval,omitempty"`
+	HTTP     *HTTPProbe   `yaml:"http,omitempty"`
+	Docker   *DockerProbe `yaml:"docker,omitempty"`
+	Command  []string     `yaml:"command,omitempty"`
 }
 
 // HTTPProbe is a GET probe with bounded diagnostics. Header values are either
@@ -16,21 +16,21 @@ type Health struct {
 // potentially secret when the URL contains them (issue #13 redacts them).
 type HTTPProbe struct {
 	URL     string       `yaml:"url"`
-	Timeout Duration     `yaml:"timeout"`
-	Status  []int        `yaml:"status"`
-	Headers []HTTPHeader `yaml:"headers"`
+	Timeout Duration     `yaml:"timeout,omitempty"`
+	Status  []int        `yaml:"status,omitempty"`
+	Headers []HTTPHeader `yaml:"headers,omitempty"`
 }
 
 // HTTPHeader is one probe header: exactly one of value or secret_ref.
 type HTTPHeader struct {
 	Name      string     `yaml:"name"`
-	Value     string     `yaml:"value"`
-	SecretRef *SecretRef `yaml:"secret_ref"`
+	Value     string     `yaml:"value,omitempty"`
+	SecretRef *SecretRef `yaml:"secret_ref,omitempty"`
 }
 
 // DockerProbe requires the container's Docker health status.
 type DockerProbe struct {
-	Required *bool `yaml:"required"`
+	Required *bool `yaml:"required,omitempty"`
 }
 
 // Health states used across store, API, and dashboard projections.

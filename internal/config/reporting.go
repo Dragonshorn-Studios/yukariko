@@ -5,47 +5,47 @@ package config
 // references only; a literal secret in YAML is not representable by this
 // schema and is rejected as an unknown field.
 type Reporting struct {
-	Outbound OutboundReporting `yaml:"outbound"`
-	Inbound  InboundReporting  `yaml:"inbound"`
+	Outbound OutboundReporting `yaml:"outbound,omitempty"`
+	Inbound  InboundReporting  `yaml:"inbound,omitempty"`
 }
 
 // OutboundReporting sends signed status events to one peer receiver.
 type OutboundReporting struct {
-	Enabled           bool       `yaml:"enabled"`
-	URL               string     `yaml:"url"`
-	HostID            string     `yaml:"host_id"`
-	SecretRef         *SecretRef `yaml:"secret_ref"`
-	HeartbeatInterval Duration   `yaml:"heartbeat_interval"`
+	Enabled           bool       `yaml:"enabled,omitempty"`
+	URL               string     `yaml:"url,omitempty"`
+	HostID            string     `yaml:"host_id,omitempty"`
+	SecretRef         *SecretRef `yaml:"secret_ref,omitempty"`
+	HeartbeatInterval Duration   `yaml:"heartbeat_interval,omitempty"`
 }
 
 // InboundReporting accepts signed reports from allowlisted hosts.
 type InboundReporting struct {
-	Enabled      bool         `yaml:"enabled"`
-	RequireTLS   *bool        `yaml:"require_tls"`
-	MaxBodyBytes int          `yaml:"max_body_bytes"`
-	ClockSkew    Duration     `yaml:"clock_skew"`
-	ReplayWindow Duration     `yaml:"replay_window"`
-	RateLimit    RateLimit    `yaml:"rate_limit"`
-	Hosts        []ReportHost `yaml:"hosts"`
+	Enabled      bool         `yaml:"enabled,omitempty"`
+	RequireTLS   *bool        `yaml:"require_tls,omitempty"`
+	MaxBodyBytes int          `yaml:"max_body_bytes,omitempty"`
+	ClockSkew    Duration     `yaml:"clock_skew,omitempty"`
+	ReplayWindow Duration     `yaml:"replay_window,omitempty"`
+	RateLimit    RateLimit    `yaml:"rate_limit,omitempty"`
+	Hosts        []ReportHost `yaml:"hosts,omitempty"`
 }
 
 // RateLimit bounds accepted reports per host per window.
 type RateLimit struct {
-	Events int      `yaml:"events"`
-	Per    Duration `yaml:"per"`
+	Events int      `yaml:"events,omitempty"`
+	Per    Duration `yaml:"per,omitempty"`
 }
 
 // ReportHost is one allowlisted peer. Removing a host revokes it. Multiple
 // keys support rotation.
 type ReportHost struct {
 	ID   string      `yaml:"id"`
-	Keys []ReportKey `yaml:"keys"`
+	Keys []ReportKey `yaml:"keys,omitempty"`
 }
 
 // ReportKey is one accepted signing key for a host.
 type ReportKey struct {
 	KeyID     string     `yaml:"key_id"`
-	SecretRef *SecretRef `yaml:"secret_ref"`
+	SecretRef *SecretRef `yaml:"secret_ref,omitempty"`
 }
 
 // ApplyDefaults fills unset optional reporting fields.
