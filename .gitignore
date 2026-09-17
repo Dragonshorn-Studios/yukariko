@@ -1,0 +1,17 @@
+# Binaries
+/yukariko
+/yukariko.exe
+*.exe
+*.test
+*.out
+
+# Coverage
+coverage.out
+coverage.html
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store

@@ -1,0 +1,16 @@
+---
+description: Yukariko product fence and issue-scoped work. AGENTS.md is canonical.
+alwaysApply: true
+---
+
+# Yukariko
+
+Follow [AGENTS.md](../../AGENTS.md). Do not contradict it.
+
+- Work GitHub issues **#1 through #19 in order**. Read Goal / Scope / Out of scope / Acceptance / Tests first.
+- Implement only the current issue. Stub later behavior with an explicit error.
+- Host Docker, Compose, and Git remain the source of truth.
+- One binary. HTTP/UI are read-only. Reports cannot select commands.
+- Do not build Coolify, Portainer, Kubernetes, proxies, remote execution, web YAML editing, automatic rollback, or health-based restarts.
+- Do not create reserved `internal/*` packages before their owning issue.
+- After an architecture decision, update `AGENTS.md` in the same change.
