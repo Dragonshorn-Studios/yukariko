@@ -69,6 +69,9 @@ type Assembled struct {
 	// ReportHandler is non-nil when inbound reporting is enabled; it mounts
 	// at /report/v1/events, separate from the read-only dashboard API.
 	ReportHandler http.Handler
+	// Reporter is non-nil when outbound reporting is enabled; the daemon
+	// runs its drain loop and local sinks enqueue through it.
+	Reporter *report.Reporter
 }
 
 // Assemble opens the store, builds every component, and wires the
@@ -109,6 +112,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		healthSvc = &health.Service{Docker: dockerClient, Runner: runnerSvc}
 	}
 
+	reporter := reporterFor(opts.Config, st, runnerSvc)
 	checker := &SourceChecker{store: st, git: gitClient, registry: registryClient}
 	dispatcher := &DeployDispatcher{
 		store:       st,
@@ -135,12 +139,12 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Check:     checker,
 		Deploy:    dispatcher,
 		Preflight: preflight,
-		Sink:      &eventSink{store: st},
+		Sink:      &eventSink{store: st, reporter: reporter},
 	}
 	sched := schedule.New(schedOpts)
 	monitor := &health.Monitor{
 		Service: healthSvc,
-		Sink:    &healthSink{store: st},
+		Sink:    &healthSink{store: st, reporter: reporter},
 	}
 	reportHandler := reportHandlerFor(opts.Config, st)
 	var api *httpapi.Server
@@ -167,7 +171,28 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		APIOn:     api != nil,
 
 		ReportHandler: reportHandler,
+		Reporter:      reporter,
 	}, nil
+}
+
+// reporterFor builds the outbound reporter when the configuration enables
+// it; nil means reporting is off and nothing enqueues.
+func reporterFor(cfg *config.Config, st *store.Store, rn *runner.Runner) *report.Reporter {
+	out := cfg.Reporting.Outbound
+	if !out.Enabled || out.URL == "" || out.HostID == "" || out.SecretRef == nil {
+		return nil
+	}
+	interval := out.HeartbeatInterval.D()
+	if interval <= 0 {
+		interval = config.DefaultHeartbeatInterval.D()
+	}
+	return &report.Reporter{
+		Endpoint:          out.URL,
+		HostID:            out.HostID,
+		KeyRef:            out.SecretRef,
+		Store:             st,
+		HeartbeatInterval: interval,
+	}
 }
 
 // reportHandlerFor builds the authenticated inbound-report receiver when
@@ -353,6 +378,10 @@ func (b *boundCheckpoint) MarkDeployed(ctx context.Context, _, version string) e
 
 type commandRunSink struct{ store *store.Store }
 
+// health transition and state sinks optionally forward to the outbound
+// reporter (#18); reporting failures never affect local behavior because
+// Enqueue only writes to the durable outbox.
+
 func (s *commandRunSink) RecordCommandSummary(ctx context.Context, sum runner.Summary) error {
 	var exitCode *int
 	if sum.Result.Status == runner.StatusSuccess || sum.Result.Status == runner.StatusFailed {
@@ -370,7 +399,10 @@ func (s *commandRunSink) RecordCommandSummary(ctx context.Context, sum runner.Su
 	})
 }
 
-type eventSink struct{ store *store.Store }
+type eventSink struct {
+	store    *store.Store
+	reporter *report.Reporter
+}
 
 func (s *eventSink) RecordAppEvent(ctx context.Context, e schedule.Event) error {
 	level := store.LevelInfo
@@ -380,10 +412,26 @@ func (s *eventSink) RecordAppEvent(ctx context.Context, e schedule.Event) error 
 	_, err := s.store.RecordEvent(ctx, store.Event{
 		Time: e.Time, AppID: e.AppID, Level: level, Kind: e.Kind, Message: e.Detail,
 	})
+	// Deployment outcomes are reported outbound (audit events: never
+	// coalesced or dropped). Check outcomes are not — heartbeats carry
+	// liveness.
+	if s.reporter != nil && e.Kind == schedule.EventState &&
+		(e.To == schedule.StateSucceeded || e.To == schedule.StateFailed) && e.From == schedule.StateDeploying {
+		status := "succeeded"
+		if e.To == schedule.StateFailed {
+			status = "failed"
+		}
+		if err := s.reporter.EnqueueDeployment(ctx, e.AppID, e.Detail, status); err != nil {
+			return err
+		}
+	}
 	return err
 }
 
-type healthSink struct{ store *store.Store }
+type healthSink struct {
+	store    *store.Store
+	reporter *report.Reporter
+}
 
 func (s *healthSink) RecordHealthSample(ctx context.Context, smp health.Sample) error {
 	return s.store.RecordHealthSample(ctx, smp.AppID, smp.Check, smp.State, smp.Reason, nil, smp.Time)
@@ -394,5 +442,10 @@ func (s *healthSink) RecordHealthTransition(ctx context.Context, t health.Transi
 		Time: t.Time, AppID: t.AppID, Level: store.LevelWarn, Kind: "health_transition",
 		Message: fmt.Sprintf("%s: %s -> %s: %s", t.Check, t.From, t.To, t.Reason),
 	})
+	if err == nil && s.reporter != nil {
+		err = s.reporter.Enqueue(ctx, report.TypeHealth, t.AppID,
+			report.HealthData{Check: t.Check, State: t.To, Reason: t.Reason},
+			"health:"+t.AppID+":"+t.Check)
+	}
 	return err
 }
