@@ -23,8 +23,10 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/health"
 	"github.com/Dragonshorn-Studios/yukariko/internal/httpapi"
 	"github.com/Dragonshorn-Studios/yukariko/internal/registry"
+	"github.com/Dragonshorn-Studios/yukariko/internal/report"
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
+	"net/http"
 	"os"
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/state"
@@ -64,6 +66,9 @@ type Assembled struct {
 	API     *httpapi.Server
 	APIBind string
 	APIOn   bool
+	// ReportHandler is non-nil when inbound reporting is enabled; it mounts
+	// at /report/v1/events, separate from the read-only dashboard API.
+	ReportHandler http.Handler
 }
 
 // Assemble opens the store, builds every component, and wires the
@@ -137,6 +142,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Service: healthSvc,
 		Sink:    &healthSink{store: st},
 	}
+	reportHandler := reportHandlerFor(opts.Config, st)
 	var api *httpapi.Server
 	apiBind := ""
 	if opts.Config.Server.Enabled {
@@ -159,7 +165,36 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		API:       api,
 		APIBind:   apiBind,
 		APIOn:     api != nil,
+
+		ReportHandler: reportHandler,
 	}, nil
+}
+
+// reportHandlerFor builds the authenticated inbound-report receiver when
+// the configuration enables it. Key material resolves at request time via
+// SecretRefs and is never stored or logged.
+func reportHandlerFor(cfg *config.Config, st *store.Store) http.Handler {
+	inbound := cfg.Reporting.Inbound
+	if !inbound.Enabled {
+		return nil
+	}
+	return report.NewReceiver(inbound, func(hostID string) ([][]byte, bool) {
+		for _, host := range inbound.Hosts {
+			if host.ID != hostID {
+				continue
+			}
+			keys := make([][]byte, 0, len(host.Keys))
+			for _, k := range host.Keys {
+				value, err := k.SecretRef.Resolve()
+				if err != nil {
+					return nil, false // unresolvable key: treat as revoked
+				}
+				keys = append(keys, []byte(value))
+			}
+			return keys, true
+		}
+		return nil, false
+	}, st).Handler()
 }
 
 // --- source checking --------------------------------------------------------

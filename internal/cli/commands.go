@@ -77,15 +77,23 @@ func (a *App) newRunCommand() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "yukariko daemon running (data dir %s); Docker and Compose directories remain the source of truth.\n", opts.DataDir)
-			if asm.APIOn {
+			if asm.APIOn || asm.ReportHandler != nil {
+				mux := http.NewServeMux()
+				if asm.APIOn {
+					mux.Handle("/api/", asm.API.Handler())
+					mux.Handle("/api", asm.API.Handler())
+				}
+				if asm.ReportHandler != nil {
+					mux.Handle("/report/v1/events", asm.ReportHandler)
+				}
 				ln, err := net.Listen("tcp", asm.APIBind)
 				if err != nil {
 					return fmt.Errorf("bind %s: %w", asm.APIBind, err)
 				}
-				srv := &http.Server{Handler: asm.API.Handler(), ReadHeaderTimeout: 5 * time.Second}
+				srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 				go func() { _ = srv.Serve(ln) }()
 				defer srv.Close()
-				fmt.Fprintf(out, "read-only API on http://%s (GET/HEAD only).\n", asm.APIBind)
+				fmt.Fprintf(out, "listening on %s (read-only API: /api/; reports: /report/v1/events).\n", asm.APIBind)
 			}
 			var wg sync.WaitGroup
 			wg.Add(1)
