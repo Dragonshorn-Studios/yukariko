@@ -16,6 +16,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -61,7 +62,14 @@ type Request struct {
 	AppID          string
 	DeploymentID   string
 	SkipRedactArgv bool
+	// Stdin, when set, is fed to the command (bounded to 64 KiB). Used by
+	// the docker credential-helper protocol (#10); commands that read stdin
+	// are otherwise never used.
+	Stdin []byte
 }
+
+// maxStdinBytes bounds Request.Stdin.
+const maxStdinBytes = 64 << 10
 
 // Result is the bounded outcome of one command.
 type Result struct {
@@ -140,6 +148,20 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = req.Dir
 	cmd.Env = buildEnv(req.Env)
+	if len(req.Stdin) > 0 {
+		if len(req.Stdin) > maxStdinBytes {
+			finishErr := fmt.Errorf("runner: request %q stdin exceeds %d bytes", req.Name, maxStdinBytes)
+			result := Result{
+				Status:    StatusFailed,
+				StartedAt: time.Now(),
+				EndedAt:   time.Now(),
+				Err:       redactor.String(finishErr.Error()),
+			}
+			r.finish(ctx, req, result)
+			return result, nil
+		}
+		cmd.Stdin = bytes.NewReader(req.Stdin)
+	}
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			_ = killTree(cmd.Process)
