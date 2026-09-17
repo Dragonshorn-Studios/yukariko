@@ -17,6 +17,7 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/registry"
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
+	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 )
 
 const e2eDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -168,7 +169,7 @@ func TestUpdateEndToEndDeploysAndCheckpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	var rows []daemon.AppStatus
+	var rows []state.AppStatus
 	if err := json.Unmarshal([]byte(stdout2.String()), &rows); err != nil {
 		t.Fatalf("status json: %v\n%s", err, stdout2)
 	}
@@ -245,7 +246,7 @@ func TestLogsShowsHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("logs json: %v", err)
 	}
-	var events []daemon.LogEvent
+	var events []state.LogEvent
 	if err := json.Unmarshal([]byte(stdout2.String()), &events); err != nil {
 		t.Fatalf("logs json parse: %v\n%s", err, stdout2)
 	}
