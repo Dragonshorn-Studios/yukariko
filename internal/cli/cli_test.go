@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -39,7 +42,7 @@ func TestHelpListsCommands(t *testing.T) {
 		}
 	}
 	for _, alias := range []string{"materialize", "divine", "bless", "observe", "chronicle"} {
-		if strings.Contains(commands, alias) {
+		if regexp.MustCompile(`\b` + alias + `\b`).MatchString(commands) {
 			t.Errorf("help unexpectedly contains alias %q", alias)
 		}
 	}
@@ -66,28 +69,6 @@ func TestVersionFlag(t *testing.T) {
 	}
 	if !strings.Contains(got, "yukariko") {
 		t.Fatalf("version output %q does not contain binary name", got)
-	}
-}
-
-func TestStubCommandsNotImplemented(t *testing.T) {
-	t.Parallel()
-
-	// learn is real since #7; the rest remain stubs until their issues land.
-	for _, name := range []string{"run", "check", "update", "status", "logs"} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-			err := Execute(context.Background(), []string{name}, stdout, stderr)
-			if !errors.Is(err, ErrNotImplemented) {
-				t.Fatalf("got %v, want ErrNotImplemented", err)
-			}
-			if Code(err) != exitcode.Error {
-				t.Fatalf("exit code %d, want %d", Code(err), exitcode.Error)
-			}
-			if !strings.Contains(err.Error(), name) {
-				t.Fatalf("error %q does not name command", err)
-			}
-		})
 	}
 }
 
@@ -119,9 +100,11 @@ func TestConfigAndDataDirFlags(t *testing.T) {
 	t.Parallel()
 
 	app := NewApp()
+	// status parses the flags first; the missing config file is its error,
+	// which still proves both flags were consumed.
 	err := app.Execute(context.Background(), []string{"--config", "c.yaml", "--data-dir", "data", "status"}, io.Discard, io.Discard)
-	if !errors.Is(err, ErrNotImplemented) {
-		t.Fatalf("got %v, want not implemented", err)
+	if err == nil || !strings.Contains(err.Error(), "c.yaml") {
+		t.Fatalf("err = %v, want a config-file error naming the path", err)
 	}
 	opts := app.Options()
 	if opts.Config != "c.yaml" {
@@ -134,11 +117,15 @@ func TestConfigAndDataDirFlags(t *testing.T) {
 
 func TestCancelledContextReachesCommand(t *testing.T) {
 	t.Parallel()
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(path, []byte("schema_version: 1\napps:\n  - id: web\n    source: {mode: registry, registry: {images: [{ref: nginx:1}]}}\n    deploy: {mode: standalone, standalone: {image: nginx:1, name: web}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := Execute(ctx, []string{"status"}, io.Discard, io.Discard)
+	err := Execute(ctx, []string{"status", "--config", path, "--data-dir", t.TempDir()}, io.Discard, io.Discard)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v, want context.Canceled", err)
 	}
@@ -162,26 +149,30 @@ func TestRunExitCodes(t *testing.T) {
 		}
 	})
 
-	t.Run("not implemented", func(t *testing.T) {
+	t.Run("missing config", func(t *testing.T) {
 		t.Parallel()
 		stderr := &bytes.Buffer{}
 		code := Run(context.Background(), []string{"check"}, io.Discard, stderr)
-		if code != exitcode.Error {
+		if code != exitcode.Usage {
 			t.Fatalf("code %d", code)
 		}
-		if !strings.Contains(stderr.String(), "not implemented") {
+		if !strings.Contains(stderr.String(), "--config") {
 			t.Fatalf("stderr %q", stderr.String())
 		}
 	})
 
 	t.Run("cancelled", func(t *testing.T) {
 		t.Parallel()
+		path := filepath.Join(t.TempDir(), "c.yaml")
+		if err := os.WriteFile(path, []byte("schema_version: 1\napps:\n  - id: web\n    source: {mode: registry, registry: {images: [{ref: nginx:1}]}}\n    deploy: {mode: standalone, standalone: {image: nginx:1, name: web}}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		stderr := &bytes.Buffer{}
-		code := Run(ctx, []string{"status"}, io.Discard, stderr)
+		code := Run(ctx, []string{"status", "--config", path, "--data-dir", t.TempDir()}, io.Discard, stderr)
 		if code != exitcode.Interrupted {
-			t.Fatalf("code %d", code)
+			t.Fatalf("code %d (stderr %q)", code, stderr.String())
 		}
 	})
 }

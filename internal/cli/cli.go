@@ -9,14 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Dragonshorn-Studios/yukariko/internal/daemon"
 	"github.com/Dragonshorn-Studios/yukariko/internal/docker"
 	"github.com/Dragonshorn-Studios/yukariko/internal/exitcode"
 	"github.com/Dragonshorn-Studios/yukariko/internal/learn"
 	"github.com/Dragonshorn-Studios/yukariko/internal/version"
 )
-
-// ErrNotImplemented is returned by command stubs until their owning issue lands.
-var ErrNotImplemented = errors.New("not implemented")
 
 // errUsage marks flag/argument problems so Code maps them to the usage exit
 // code; command implementations wrap it with %w.
@@ -36,6 +34,7 @@ type App struct {
 	stdin        io.Reader
 	dockerClient docker.Client
 	gitProber    learn.GitProber
+	daemonHook   func(*daemon.Options)
 }
 
 // NewApp constructs a CLI with empty config and data-dir paths.
@@ -77,28 +76,14 @@ and runs controlled local commands; it does not replace Compose, Coolify, or Por
 	root.PersistentFlags().StringVar(&a.opts.Config, "config", "", "path to YAML configuration file")
 	root.PersistentFlags().StringVar(&a.opts.DataDir, "data-dir", "", "path to Yukariko data directory")
 
-	root.AddCommand(newStubCommand("run", "Run the daemon, scheduler, health monitor, and optional HTTP server"))
-	root.AddCommand(newStubCommand("check", "Observe sources and health without deploying"))
-	root.AddCommand(newStubCommand("update", "Request an update through preflight and per-app locks"))
-	root.AddCommand(newStubCommand("status", "Show process, health, and deployed-version status"))
-	root.AddCommand(newStubCommand("logs", "Show bounded structured event history"))
+	root.AddCommand(a.newRunCommand())
+	root.AddCommand(a.newCheckCommand())
+	root.AddCommand(a.newUpdateCommand())
+	root.AddCommand(a.newStatusCommand())
+	root.AddCommand(a.newLogsCommand())
 	root.AddCommand(a.newLearnCommand())
 
 	return root
-}
-
-func newStubCommand(name, short string) *cobra.Command {
-	return &cobra.Command{
-		Use:   name,
-		Short: short,
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := cmd.Context().Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("%s: %w", name, ErrNotImplemented)
-		},
-	}
 }
 
 // Execute runs the CLI with the given arguments.
