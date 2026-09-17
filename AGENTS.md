@@ -29,12 +29,14 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#3):
+Current (#5):
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, command stubs
 - `internal/config` — strict YAML schema, defaults, path-aware validation
 - `internal/store` — SQLite state/event store, forward-only migrations
+- `internal/runner` — argv-based controlled command runner with redaction
+- `internal/docker` — read-only Docker discovery, Compose project grouping
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
@@ -42,8 +44,6 @@ Reserved packages (create only when the owning issue lands):
 
 | Package | Issue |
 |---|---|
-| `internal/runner` | #4 |
-| `internal/docker` | #5–#6 |
 | `internal/learn` | #7 |
 | `internal/schedule` | #8 |
 | `internal/git` | #9 |
@@ -95,6 +95,7 @@ wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukar
 
 - Module: `github.com/Dragonshorn-Studios/yukariko`
 - Stdlib first. Cobra is the CLI router only; do not add Viper. YAML parsing is `gopkg.in/yaml.v3` with `KnownFields(true)` strict decoding (`internal/config`); keep it the only YAML dependency. SQLite runs on `modernc.org/sqlite` (pure Go, no cgo) behind `database/sql` (`internal/store`): WAL, busy timeout, forward-only migrations recorded in `schema_migrations` — never edit an applied migration, append a new one.
+- Docker access is CLI-only (`#5`): `internal/docker` builds `docker ps` / `docker inspect` argv and executes them through `internal/runner`; no Docker SDK or socket dependency, now or later. Discovery records environment-variable **names only** — inspect values must never enter results, logs, or storage — and the runner used for discovery must not attach a persistence `Sink`. Docker daemon access is host-equivalent privilege; see `docs/docker-access.md`.
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.
