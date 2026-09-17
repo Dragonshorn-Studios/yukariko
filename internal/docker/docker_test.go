@@ -305,6 +305,65 @@ func TestParseInspectEmptyOutput(t *testing.T) {
 	}
 }
 
+// TestParseInspectSafetySemantics covers the fields later issues need to
+// judge standalone reproducibility: privileged mode, PID/IPC namespace
+// sharing, and the healthcheck definition.
+func TestParseInspectSafetySemantics(t *testing.T) {
+	t.Parallel()
+	const doc = `[
+  {
+    "Id": "bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222",
+    "Name": "/worker",
+    "Image": "sha256:3333",
+    "Config": {
+      "Image": "myapp@sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "Healthcheck": {
+        "Test": ["CMD-SHELL", "curl -f http://localhost/health || exit 1"],
+        "Interval": 30000000000,
+        "Timeout": 5000000000,
+        "Retries": 3,
+        "StartPeriod": 15000000000
+      }
+    },
+    "State": {"Status": "running", "Running": true},
+    "HostConfig": {
+      "Privileged": true,
+      "PidMode": "host",
+      "IpcMode": "container:abc111",
+      "NetworkMode": "bridge",
+      "RestartPolicy": {"Name": "always"}
+    },
+    "Mounts": [],
+    "NetworkSettings": {"Ports": {}, "Networks": {}}
+  }
+]`
+	det := mustParseInspect(t, doc)
+	if !det.Privileged {
+		t.Error("Privileged must be captured for reproducibility verdicts")
+	}
+	if det.PidMode != "host" || det.IpcMode != "container:abc111" {
+		t.Errorf("pid/ipc modes = %q / %q", det.PidMode, det.IpcMode)
+	}
+	if det.RestartPolicy != "always" {
+		t.Errorf("RestartPolicy = %q", det.RestartPolicy)
+	}
+	if det.HealthCheck == nil {
+		t.Fatal("HealthCheck definition missing")
+	}
+	hc := det.HealthCheck
+	if strings.Join(hc.Test, "|") != "CMD-SHELL|curl -f http://localhost/health || exit 1" {
+		t.Errorf("HealthCheck.Test = %v", hc.Test)
+	}
+	if hc.IntervalNS != 30_000_000_000 || hc.TimeoutNS != 5_000_000_000 || hc.StartPeriodNS != 15_000_000_000 || hc.Retries != 3 {
+		t.Errorf("HealthCheck timings = %+v", hc)
+	}
+	// A disabled healthcheck is captured as the docker "NONE" convention.
+	const none = `[{"Id":"cccc","Config":{"Healthcheck":{"Test":["NONE"]}},"HostConfig":{},"NetworkSettings":{}}]`
+	if det := mustParseInspect(t, none); det.HealthCheck == nil || len(det.HealthCheck.Test) != 1 || det.HealthCheck.Test[0] != "NONE" {
+		t.Errorf("disabled healthcheck = %+v", det.HealthCheck)
+	}
+}
+
 func TestClassifyFailures(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

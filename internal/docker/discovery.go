@@ -14,12 +14,13 @@ import (
 // Compose label keys used for grouping. Compose v1 and v2 set the same
 // prefixes on every container they manage.
 const (
-	LabelProject         = "com.docker.compose.project"
-	LabelService         = "com.docker.compose.service"
-	LabelWorkDir         = "com.docker.compose.project.working_dir"
-	LabelConfigFiles     = "com.docker.compose.project.config_files"
-	LabelContainerNumber = "com.docker.compose.container-number"
-	LabelOneOff          = "com.docker.compose.oneoff"
+	LabelProject          = "com.docker.compose.project"
+	LabelService          = "com.docker.compose.service"
+	LabelWorkDir          = "com.docker.compose.project.working_dir"
+	LabelConfigFiles      = "com.docker.compose.project.config_files"
+	LabelEnvironmentFiles = "com.docker.compose.project.environment_file"
+	LabelContainerNumber  = "com.docker.compose.container-number"
+	LabelOneOff           = "com.docker.compose.oneoff"
 )
 
 // composeLabelKeys are the labels that mark a container as Compose-managed
@@ -77,6 +78,18 @@ type NetworkAttachment struct {
 	Aliases []string
 }
 
+// HealthCheckDef is the container's healthcheck definition as configured on
+// the image or container. Docker encodes durations as integer nanoseconds;
+// the fields keep that raw unit so no rounding happens before a consumer
+// maps them. Test ["NONE"] means the healthcheck is explicitly disabled.
+type HealthCheckDef struct {
+	Test          []string
+	IntervalNS    int64
+	TimeoutNS     int64
+	StartPeriodNS int64
+	Retries       int
+}
+
 // ContainerDetail is the recreation-relevant slice of `docker inspect`.
 // Environment variables are captured as NAMES only: inspect carries raw
 // values, and values must never enter results, logs, or storage.
@@ -91,6 +104,7 @@ type ContainerDetail struct {
 	Paused          bool
 	Restarting      bool
 	Health          HealthState
+	HealthCheck     *HealthCheckDef
 	Cmd             []string
 	Entrypoint      []string
 	User            string
@@ -100,6 +114,9 @@ type ContainerDetail struct {
 	RestartPolicy   string // no|always|unless-stopped|on-failure
 	RestartMaxRetry int
 	NetworkMode     string
+	Privileged      bool
+	PidMode         string // ""|private = isolated; host|container:*|... = shared
+	IpcMode         string // ""|private|shareable = isolated; host|container:* = shared
 	Mounts          []Mount
 	Ports           []PortMapping
 	Networks        []NetworkAttachment
