@@ -42,22 +42,26 @@ go vet ./...
 
 ## Commands
 
-The binary routes these commands. `learn` is operational; the rest fail with an explicit `not implemented` error until their dedicated issues land.
+Every command is operational. Each themed alias is the same command with identical behavior — use whichever you prefer.
 
-| Command | Purpose |
-|---|---|
-| `run` | Daemon, scheduler, health monitor, optional HTTP server |
-| `check` | Observe sources and health without deploying |
-| `update` | Request updates through preflight and per-app locks |
-| `status` | Process, health, and version status |
-| `logs` | Bounded structured event history |
-| `learn` | One-time onboarding: scan local Docker read-only, select candidates, resolve required fields, preview a YAML diff, and import after explicit confirmation |
+| Command | Aliases | Purpose |
+|---|---|---|
+| `run` | `materialize` | Daemon: per-app scheduling, deployments, health monitoring, reporting |
+| `check` | `divine` | Observe Git branches and registry digests without deploying |
+| `update` | `bless` | One deployment pass for `--app <id>` or `--all` through preflight and the per-app lock (`--dry-run` previews) |
+| `status` | `observe` | Deployed vs observed versions, pending updates, health, last deployment (`--json`) |
+| `logs` | `chronicle` | Bounded, filterable structured event history (`--json`) |
+| `learn` | — | One-time onboarding: scan local Docker read-only, select candidates, resolve required fields, preview a YAML diff, import after explicit confirmation |
 
 `yukariko learn --config yukariko.yaml` scans running and stopped containers (never mutating Docker), proposes one app per Compose project and per standalone container, and writes only after you confirm the diff — with a timestamped backup, atomic replacement, and full re-validation. Existing manual settings (intervals, retries, steps, health, enabled) survive merges. Flags: `--dry-run` previews without writing, `--json` prints machine-readable proposals without prompts, `--include-system` offers system/infrastructure candidates (excluded by default). learn never deploys anything; monitoring starts when the daemon runs.
 
-Global flags: `--config`, `--data-dir`, `--version`. The remaining commands do not consume configuration yet; their issues wire that up.
+Global flags: `--config`, `--data-dir` (default `./data`), `--version`. Exit codes for scripts: 0 ok, 1 error, 2 usage, 130 interrupted.
 
-`yukariko --help` and `yukariko --version` work today.
+`yukariko --help` documents every command; `yukariko --version` reports the build.
+
+## Operations and security
+
+Installation, systemd hardening, upgrades, SQLite backup, private Git/registry auth, reporting key rotation, retention, troubleshooting, and recovery steps: [`docs/operations.md`](docs/operations.md). The threat model, security checklist, and Docker-privilege implications: [`docs/security.md`](docs/security.md) and [`docs/docker-access.md`](docs/docker-access.md). Release builds with checksums: `scripts/build-release.sh <version>`. The end-to-end acceptance suite: `go test -tags e2e ./internal/e2e/`.
 
 ## Configuration
 

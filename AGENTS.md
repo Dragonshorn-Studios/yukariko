@@ -29,7 +29,7 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#16):
+Complete (#1–#19): the MVP scope is frozen.
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, all operational commands + themed aliases
@@ -43,15 +43,11 @@ Current (#16):
 - `internal/schedule` — per-app loops, state machine, locks, backoff, preflight
 - `internal/registry` — OCI/Distribution digest resolution (auth, platform, typed errors)
 - `internal/health` — HTTP/docker/command probes, post-deploy checks, independent monitor
-- `internal/deploy` — compose pipeline (#11); standalone recreation (#12)
+- `internal/deploy` — compose pipeline (#11); standalone recreation (#12); Docker CLI engine
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
-Reserved packages (create only when the owning issue lands):
-
-| Package | Issue |
-|---|---|
-| `internal/deploy` | #11–#12 |
+New packages require an issue that updates this file first.
 | `internal/git` | #9 |
 | `internal/registry` | #10 |
 | `internal/deploy` | #11–#12 |
