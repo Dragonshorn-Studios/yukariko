@@ -9,22 +9,33 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Dragonshorn-Studios/yukariko/internal/docker"
 	"github.com/Dragonshorn-Studios/yukariko/internal/exitcode"
+	"github.com/Dragonshorn-Studios/yukariko/internal/learn"
 	"github.com/Dragonshorn-Studios/yukariko/internal/version"
 )
 
 // ErrNotImplemented is returned by command stubs until their owning issue lands.
 var ErrNotImplemented = errors.New("not implemented")
 
-// Options holds global flags. Paths are stored only; YAML is not loaded until issue #2.
+// errUsage marks flag/argument problems so Code maps them to the usage exit
+// code; command implementations wrap it with %w.
+var errUsage = errors.New("usage error")
+
+// Options holds global flags. Paths are stored only; YAML is not loaded until
+// a command needs it.
 type Options struct {
 	Config  string
 	DataDir string
 }
 
-// App is the Yukariko CLI.
+// App is the Yukariko CLI. The unexported dependency fields exist so tests
+// can inject fakes; production builds use the real implementations.
 type App struct {
-	opts Options
+	opts         Options
+	stdin        io.Reader
+	dockerClient docker.Client
+	gitProber    learn.GitProber
 }
 
 // NewApp constructs a CLI with empty config and data-dir paths.
@@ -71,7 +82,7 @@ and runs controlled local commands; it does not replace Compose, Coolify, or Por
 	root.AddCommand(newStubCommand("update", "Request an update through preflight and per-app locks"))
 	root.AddCommand(newStubCommand("status", "Show process, health, and deployed-version status"))
 	root.AddCommand(newStubCommand("logs", "Show bounded structured event history"))
-	root.AddCommand(newStubCommand("learn", "Import local Docker/Compose apps into configuration"))
+	root.AddCommand(a.newLearnCommand())
 
 	return root
 }
@@ -127,6 +138,12 @@ func Code(err error) int {
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return exitcode.Interrupted
+	}
+	if errors.Is(err, learn.ErrAborted) {
+		return exitcode.Interrupted
+	}
+	if errors.Is(err, errUsage) {
+		return exitcode.Usage
 	}
 	if isUsageError(err) {
 		return exitcode.Usage

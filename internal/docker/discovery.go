@@ -83,11 +83,11 @@ type NetworkAttachment struct {
 // the fields keep that raw unit so no rounding happens before a consumer
 // maps them. Test ["NONE"] means the healthcheck is explicitly disabled.
 type HealthCheckDef struct {
-	Test          []string
-	IntervalNS    int64
-	TimeoutNS     int64
-	StartPeriodNS int64
-	Retries       int
+	Test          []string `json:"test"`
+	IntervalNS    int64    `json:"interval_ns"`
+	TimeoutNS     int64    `json:"timeout_ns"`
+	StartPeriodNS int64    `json:"start_period_ns"`
+	Retries       int      `json:"retries"`
 }
 
 // ContainerDetail is the recreation-relevant slice of `docker inspect`.

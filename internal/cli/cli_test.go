@@ -72,7 +72,8 @@ func TestVersionFlag(t *testing.T) {
 func TestStubCommandsNotImplemented(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"run", "check", "update", "status", "logs", "learn"} {
+	// learn is real since #7; the rest remain stubs until their issues land.
+	for _, name := range []string{"run", "check", "update", "status", "logs"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}

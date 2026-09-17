@@ -45,79 +45,79 @@ const appIDMaxLen = 63
 // cannot be imported until the user supplies or explicitly accepts a value
 // for each.
 type Confirmation struct {
-	Field  string // configuration path the user must resolve, e.g. source.git.branch
-	Reason string // why the value could not be determined from evidence
+	Field  string `json:"field"`  // configuration path the user must resolve, e.g. source.git.branch
+	Reason string `json:"reason"` // why the value could not be determined from evidence
 }
 
 // ServiceImage is one Compose service's observed image evidence.
 type ServiceImage struct {
-	Service string
-	Image   string // reference as observed on the container
+	Service string `json:"service"`
+	Image   string `json:"image"` // reference as observed on the container
 }
 
 // ComposeProposal is the evidence-backed draft for one Compose project.
 // Compose is always preferred over reconstructing its containers manually:
 // the project is proposed as a single app deployed through its own files.
 type ComposeProposal struct {
-	ProjectName string
-	WorkDir     string // "" = unknown (see the proposal's confirmations)
-	ConfigFiles []string
-	EnvFiles    []string // proposed only when label evidence exists
-	Profiles    []string // no per-container evidence exists today; always nil
-	Services    []ServiceImage
+	ProjectName string         `json:"project_name"`
+	WorkDir     string         `json:"work_dir,omitempty"` // "" = unknown (see the proposal's confirmations)
+	ConfigFiles []string       `json:"config_files,omitempty"`
+	EnvFiles    []string       `json:"env_files,omitempty"` // proposed only when label evidence exists
+	Profiles    []string       `json:"profiles,omitempty"`  // no per-container evidence exists today; always nil
+	Services    []ServiceImage `json:"services,omitempty"`
 
-	SourceMode     string // config.SourceGit or config.SourceRegistry; "" = undetermined
-	Git            *GitEvidence
-	RegistryImages []string // observed per-service images, when SourceMode is registry
+	SourceMode     string       `json:"source_mode,omitempty"` // config.SourceGit or config.SourceRegistry; "" = undetermined
+	Git            *GitEvidence `json:"git,omitempty"`
+	RegistryImages []string     `json:"registry_images,omitempty"` // observed per-service images, when SourceMode is registry
 }
 
 // StandaloneProposal is the observed launch spec of one standalone container
 // plus its reproducibility verdict. Environment keys are names only.
 type StandaloneProposal struct {
-	ContainerName string
-	Image         string
-	Entrypoint    []string
-	Command       []string
-	EnvKeys       []string // names only; values were never captured
-	Binds         []string
-	Ports         []string
-	Networks      []string
-	Restart       string
-	Labels        map[string]string
-	User          string
-	WorkDir       string
-	HealthCheck   *docker.HealthCheckDef // nil = none or explicitly disabled
+	ContainerName string                 `json:"container_name"`
+	Image         string                 `json:"image,omitempty"`
+	Entrypoint    []string               `json:"entrypoint,omitempty"`
+	Command       []string               `json:"command,omitempty"`
+	EnvKeys       []string               `json:"env_keys,omitempty"` // names only; values were never captured
+	Binds         []string               `json:"binds,omitempty"`
+	Ports         []string               `json:"ports,omitempty"`
+	Networks      []string               `json:"networks,omitempty"`
+	Restart       string                 `json:"restart,omitempty"`
+	Labels        map[string]string      `json:"labels,omitempty"`
+	User          string                 `json:"user,omitempty"`
+	WorkDir       string                 `json:"work_dir,omitempty"`
+	HealthCheck   *docker.HealthCheckDef `json:"health_check,omitempty"` // nil = none or explicitly disabled
 }
 
 // GitEvidence is the read-only Git worktree evidence behind a git-source
 // proposal. The URL is credential-stripped; it informs the user, and the
 // host's Git credentials keep working as before.
 type GitEvidence struct {
-	Dir           string // the directory that was probed (the compose workdir)
-	Branch        string // "" when detached or unknown
-	Remote        string // remote name found in the worktree; "" = none
-	RemoteURL     string // credential-stripped; informational
-	CredsStripped bool   // true when the remote URL carried credentials
-	Detached      bool
+	Dir           string `json:"dir"`                      // the directory that was probed (the compose workdir)
+	Branch        string `json:"branch,omitempty"`         // "" when detached or unknown
+	Remote        string `json:"remote,omitempty"`         // remote name found in the worktree; "" = none
+	RemoteURL     string `json:"remote_url,omitempty"`     // credential-stripped; informational
+	CredsStripped bool   `json:"creds_stripped,omitempty"` // true when the remote URL carried credentials
+	Detached      bool   `json:"detached,omitempty"`
 }
 
 // Proposal is one reviewable candidate app.
 type Proposal struct {
-	ID              string // stable candidate app ID (config slug, unique here)
-	Mode            string // config.DeployCompose or config.DeployStandalone
-	SystemCandidate bool   // likely Yukariko/system; callers exclude by default
-	SystemReasons   []string
+	ID              string   `json:"id"`                         // stable candidate app ID (config slug, unique here)
+	Mode            string   `json:"mode"`                       // config.DeployCompose or config.DeployStandalone
+	SystemCandidate bool     `json:"system_candidate,omitempty"` // likely Yukariko/system; callers exclude by default
+	SystemReasons   []string `json:"system_reasons,omitempty"`
 
-	Verdict       string // VerdictReady | VerdictNeedsConfirmation | VerdictUnsupported
-	Confirmations []Confirmation
+	Verdict       string         `json:"verdict"` // VerdictReady | VerdictNeedsConfirmation | VerdictUnsupported
+	Confirmations []Confirmation `json:"confirmations,omitempty"`
 	// TODOs are manual supply items (environment values as refs/values);
 	// like confirmations they block import until handled.
-	TODOs []string
+	TODOs []string `json:"todos,omitempty"`
 	// Blockers are non-empty only for refused candidates.
-	Blockers []string
+	Blockers []string `json:"blockers,omitempty"`
 
-	Compose    *ComposeProposal    // non-nil iff Mode is compose
-	Standalone *StandaloneProposal // non-nil iff Mode is standalone
+	Compose    *ComposeProposal    `json:"compose,omitempty"`    // non-nil iff Mode is compose
+	Standalone *StandaloneProposal `json:"standalone,omitempty"` // non-nil iff Mode is standalone
 }
 
 // candidate pairs a proposal with the inputs of unique-ID assignment.

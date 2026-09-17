@@ -31,8 +31,20 @@ func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
 // D returns the underlying time.Duration.
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
-// MarshalYAML writes the duration in Go string form ("5m") so generated
-// configuration stays human-readable instead of leaking nanosecond integers.
+// MarshalYAML writes the duration in a compact, human-readable form so
+// generated configuration stays readable instead of leaking nanosecond
+// integers: whole hours render as "24h", whole minutes as "15m", anything
+// else falls back to Go's duration string ("7m30s").
 func (d Duration) MarshalYAML() (any, error) {
-	return time.Duration(d).String(), nil
+	dv := time.Duration(d)
+	switch {
+	case dv <= 0:
+		return "0s", nil // omitempty drops zero before this; kept for safety
+	case dv%time.Hour == 0:
+		return fmt.Sprintf("%dh", int64(dv/time.Hour)), nil
+	case dv%time.Minute == 0:
+		return fmt.Sprintf("%dm", int64(dv/time.Minute)), nil
+	default:
+		return dv.String(), nil
+	}
 }

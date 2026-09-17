@@ -42,7 +42,7 @@ go vet ./...
 
 ## Commands
 
-The binary currently routes these commands. Each one fails with an explicit `not implemented` error until its dedicated issue lands.
+The binary routes these commands. `learn` is operational; the rest fail with an explicit `not implemented` error until their dedicated issues land.
 
 | Command | Purpose |
 |---|---|
@@ -51,9 +51,11 @@ The binary currently routes these commands. Each one fails with an explicit `not
 | `update` | Request updates through preflight and per-app locks |
 | `status` | Process, health, and version status |
 | `logs` | Bounded structured event history |
-| `learn` | Import local Docker/Compose apps into configuration |
+| `learn` | One-time onboarding: scan local Docker read-only, select candidates, resolve required fields, preview a YAML diff, and import after explicit confirmation |
 
-Global flags: `--config`, `--data-dir`, `--version`. The commands do not consume configuration yet; their issues wire that up.
+`yukariko learn --config yukariko.yaml` scans running and stopped containers (never mutating Docker), proposes one app per Compose project and per standalone container, and writes only after you confirm the diff — with a timestamped backup, atomic replacement, and full re-validation. Existing manual settings (intervals, retries, steps, health, enabled) survive merges. Flags: `--dry-run` previews without writing, `--json` prints machine-readable proposals without prompts, `--include-system` offers system/infrastructure candidates (excluded by default). learn never deploys anything; monitoring starts when the daemon runs.
+
+Global flags: `--config`, `--data-dir`, `--version`. The remaining commands do not consume configuration yet; their issues wire that up.
 
 `yukariko --help` and `yukariko --version` work today.
 

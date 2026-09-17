@@ -23,33 +23,35 @@ import (
 // Bumping it requires a migration path documented in docs/config.md.
 const CurrentSchemaVersion = 1
 
-// Config is the root configuration document.
+// Config is the root configuration document. Optional fields carry
+// omitempty so learn (#7) can render a round-trippable document: values a
+// user omitted are not re-emitted as zeros (which validation rejects).
 type Config struct {
 	SchemaVersion int       `yaml:"schema_version"`
-	Server        Server    `yaml:"server"`
-	Reporting     Reporting `yaml:"reporting"`
-	Retention     Retention `yaml:"retention"`
-	Limits        Limits    `yaml:"limits"`
-	Apps          []App     `yaml:"apps"`
+	Server        Server    `yaml:"server,omitempty"`
+	Reporting     Reporting `yaml:"reporting,omitempty"`
+	Retention     Retention `yaml:"retention,omitempty"`
+	Limits        Limits    `yaml:"limits,omitempty"`
+	Apps          []App     `yaml:"apps,omitempty"`
 }
 
 // Server configures the read-only HTTP API and dashboard (issue #15/#16).
 type Server struct {
-	Enabled bool   `yaml:"enabled"`
-	Bind    string `yaml:"bind"`
+	Enabled bool   `yaml:"enabled,omitempty"`
+	Bind    string `yaml:"bind,omitempty"`
 }
 
 // Retention bounds how long operational history is kept. Zero values are
 // replaced by defaults; cleanup primitives live in the store (issue #3).
 type Retention struct {
-	EventsDays      int `yaml:"events_days"`
-	HealthDays      int `yaml:"health_days"`
-	DeploymentsDays int `yaml:"deployments_days"`
+	EventsDays      int `yaml:"events_days,omitempty"`
+	HealthDays      int `yaml:"health_days,omitempty"`
+	DeploymentsDays int `yaml:"deployments_days,omitempty"`
 }
 
 // Limits bound resource usage of untrusted-sized inputs such as command output.
 type Limits struct {
-	CommandOutputBytes int `yaml:"command_output_bytes"`
+	CommandOutputBytes int `yaml:"command_output_bytes,omitempty"`
 }
 
 // DefaultServerBind is deliberately loopback-only; exposing the dashboard is a
@@ -119,6 +121,35 @@ func Parse(data []byte) (*Config, error) {
 	cfg.ApplyDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	return &cfg, nil
+}
+
+// DecodeRaw strictly decodes configuration bytes without applying defaults
+// or validating. It exists so tools that write configuration back to disk
+// (issue #7 learn) can render a minimally-changed document instead of
+// materializing defaults; such callers must validate with Parse/Load before
+// trusting the result. Schema version is still checked.
+func DecodeRaw(data []byte) (*Config, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+
+	var cfg Config
+	if err := dec.Decode(&cfg); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, errors.New("configuration is empty")
+		}
+		return nil, decodeError(err)
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, errors.New("expected exactly one YAML document")
+	}
+	if cfg.SchemaVersion == 0 {
+		return nil, errors.New("schema_version: is required (current version is 1)")
+	}
+	if cfg.SchemaVersion != CurrentSchemaVersion {
+		return nil, fmt.Errorf("schema_version: %d is not supported by this build (supports %d); migrate the configuration as described in docs/config.md", cfg.SchemaVersion, CurrentSchemaVersion)
 	}
 	return &cfg, nil
 }

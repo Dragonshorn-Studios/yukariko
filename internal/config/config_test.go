@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -768,5 +769,65 @@ func TestValidPortSpec(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("validPortSpec(%q) ok = %v, want %v", tt.spec, got, tt.want)
 		}
+	}
+}
+
+// TestDocumentRoundTrip pins the omitempty rendering contract that learn
+// (#7) relies on: parse, re-marshal, and re-parse must succeed, and omitted
+// optional fields must not reappear as zeros.
+func TestDocumentRoundTrip(t *testing.T) {
+	t.Parallel()
+	original := `
+schema_version: 1
+apps:
+  - id: web
+    display_name: Web
+    enabled: false
+    source:
+      mode: git
+      git:
+        dir: /srv/web
+        branch: main
+    deploy:
+      mode: compose
+      compose:
+        work_dir: /srv/web
+        files:
+          - /srv/web/compose.yaml
+    health:
+      http:
+        url: http://web.local/health
+`
+	cfg, err := DecodeRaw([]byte(original))
+	if err != nil {
+		t.Fatalf("DecodeRaw: %v", err)
+	}
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if bytes.Contains(out, []byte("0s")) {
+		t.Errorf("re-marshaled document fabricates zero durations:\n%s", out)
+	}
+	for _, noise := range []string{"retry:", "interval:", "server:", "retention:", "limits:", "reporting:"} {
+		if bytes.Contains(out, []byte(noise)) {
+			t.Errorf("re-marshaled document emits unset %s:\n%s", noise, out)
+		}
+	}
+	// An explicitly false `enabled` must survive the round trip (a pointer
+	// to false is a set value, not the omitted zero).
+	if !bytes.Contains(out, []byte("enabled: false")) {
+		t.Errorf("explicit enabled: false lost:\n%s", out)
+	}
+	// The rendered document must validate again and preserve the fields.
+	again, err := Parse(out)
+	if err != nil {
+		t.Fatalf("re-Parse: %v\n%s", err, out)
+	}
+	if again.Apps[0].ID != "web" || again.Apps[0].Source.Git.Branch != "main" {
+		t.Errorf("round trip changed the app: %+v", again.Apps[0])
+	}
+	if again.Apps[0].IsEnabled() {
+		t.Error("enabled: false must stay disabled after defaults")
 	}
 }
