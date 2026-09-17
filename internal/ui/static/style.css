@@ -1,0 +1,83 @@
+/* Yukariko dashboard — original stylesheet (see docs/ASSETS.md).
+   Palette: deep navy, ivory, lapis, restrained gold; archive/chapel mood. */
+:root {
+  --navy: #14213d;
+  --navy-deep: #0d1628;
+  --ivory: #f6f1e7;
+  --lapis: #2e5ea8;
+  --gold: #b99a45;
+  --fail: #9e3b3b;
+  --stale: #6b7280;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0 auto;
+  max-width: 60rem;
+  padding: 1rem;
+  background: var(--navy-deep);
+  color: var(--ivory);
+  font: 1rem/1.5 Georgia, "Times New Roman", serif;
+}
+a { color: var(--gold); }
+a.skip {
+  position: absolute;
+  left: -999px;
+}
+a.skip:focus { left: 1rem; }
+header { border-bottom: 1px solid var(--gold); padding-bottom: 0.5rem; }
+.wordmark {
+  font-size: 1.6rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: 0;
+}
+.tagline { font-style: italic; margin: 0 0 0.5rem; color: var(--ivory); }
+nav a {
+  display: inline-block;
+  margin-right: 1rem;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+nav a[aria-current="page"] { border-bottom-color: var(--gold); color: var(--ivory); }
+main { padding: 1rem 0; }
+h1, h2 { color: var(--ivory); }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.15rem; border-bottom: 1px solid var(--lapis); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5rem 0 1.5rem;
+  background: var(--navy);
+}
+caption { text-align: left; font-style: italic; color: var(--gold); padding: 0.25rem 0; }
+th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--lapis); overflow-wrap: anywhere; }
+thead th { color: var(--gold); border-bottom: 2px solid var(--gold); }
+.badge {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid;
+  font-family: Georgia, serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+}
+.badge.ok { color: var(--ivory); border-color: var(--lapis); background: var(--lapis); }
+.badge.warn { color: var(--navy-deep); border-color: var(--gold); background: var(--gold); }
+.badge.fail { color: var(--ivory); border-color: var(--fail); background: var(--fail); }
+.badge.stale { color: var(--ivory); border-color: var(--stale); background: var(--stale); }
+.badge.offline { color: var(--stale); border-style: dashed; }
+footer {
+  border-top: 1px solid var(--lapis);
+  color: var(--ivory);
+  font-size: 0.85rem;
+}
+@media (max-width: 40rem) {
+  body { padding: 0.5rem; }
+  table, thead, tbody, tr, th, td { display: block; }
+  thead { display: none; }
+  tr { margin-bottom: 0.75rem; border-bottom: 1px solid var(--lapis); }
+  th, td { border: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

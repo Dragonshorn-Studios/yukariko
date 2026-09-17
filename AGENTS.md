@@ -29,7 +29,7 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#18):
+Current (#16):
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, all operational commands + themed aliases
@@ -113,6 +113,7 @@ wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukar
 - Daemon wiring (`#14`): `internal/daemon.Assemble` builds every component and the store adapters; `SourceChecker` routes git/registry checks and records observations (kind `git_sha`, or `digest:<canonical ref>` per image) separately from deployed versions; `DeployDispatcher` opens a deployment row per run and binds its checkpoint to `CommitDeploymentSuccess` — the only path that advances the deployed version. Commands `run/check/update/status/logs` each have a themed alias implemented as the same cobra command (behaviorally identical by construction); `check` never deploys, `update --dry-run` runs check+preflight only, and all commands require `--config` plus a data dir (default `./data`).
 - Read-only API (`#15`): `internal/httpapi` serves GET/HEAD-only JSON (`/api/v1/apps`, `/apps/{id}`, `/hosts`, `/deployments`, `/logs`, `/health`) with security headers, capped pagination, and JSON errors; route projections live in `internal/state` (shared with the CLI) to keep `httpapi` free of daemon imports. Remote-host availability derives deterministically from heartbeat age (online ≤ stale-after ≤ stale ≤ offline-after; default 3m/10m) and absence is never healthy. Local/remote records expose source and age. The bind defaults to loopback; exposure is an operator decision behind existing access controls. No route can mutate anything.
 - Outbound reporting (`#18`): `internal/report.Reporter` persists every report to the #3 outbox BEFORE delivery (enqueue is local and cannot fail from receiver outages), then drains with bounded exponential backoff (+jitter, Retry-After respected). Heartbeats coalesce; deployment/audit events never coalesce and are never dropped under queue pressure — the high-water policy only drops coalesced heartbeats and emits a diagnostic. Permanent rejections (401/403) retire an event with the reason in its attempt history; 409 on retry means delivered (lost-ACK dedup). Reporting failures never block checks or deploys: enqueue is the only local coupling, and the drain loop is an independent goroutine. Secrets sign requests at send time via SecretRef and are never logged.
+- Dashboard (`#16`): `internal/ui` server-renders with html/template + embed — no JavaScript, no forms, no build chain. The four sections (Sanctuary overview, Vestments versions, Chronicle history, Divination health) render from the same `internal/state` projections as the CLI/API. Running/health/update/deployment are separate columns and separate badge classes (they cannot be confused visually or textually); remote source/age and stale/offline are prominent. All assets are original (docs/ASSETS.md inventories them); the palette is navy/ivory/lapis/restrained gold with reduced-motion and responsive rules.
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.

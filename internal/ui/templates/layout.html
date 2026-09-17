@@ -1,0 +1,28 @@
+{{define "layout.html"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Yukariko · {{.Title}}</title>
+<link rel="stylesheet" href="/ui/static/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header>
+  <p class="wordmark">Yukariko</p>
+  <p class="tagline">read-only archive of deployed things</p>
+  <nav aria-label="Sections">
+    {{range .Nav}}<a href="{{.Href}}"{{if eq .Section $.Section}} aria-current="page"{{end}}>{{.Label}}</a>
+    {{end}}
+  </nav>
+</header>
+<main id="main">
+{{template "content" .}}
+</main>
+<footer>
+  <p>Yukariko observes and records; Docker, Compose, and Git stay the source of truth.
+     No control exists on these pages.</p>
+  <p>Generated {{.Now}}</p>
+</footer>
+</body>
+</html>{{end}}

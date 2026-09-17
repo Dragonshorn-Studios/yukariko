@@ -77,8 +77,10 @@ func (a *App) newRunCommand() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "yukariko daemon running (data dir %s); Docker and Compose directories remain the source of truth.\n", opts.DataDir)
-			if asm.APIOn || asm.ReportHandler != nil {
+			if asm.APIOn || asm.ReportHandler != nil || true {
 				mux := http.NewServeMux()
+				mux.Handle("/ui", asm.UI)
+				mux.Handle("/ui/", asm.UI)
 				if asm.APIOn {
 					mux.Handle("/api/", asm.API.Handler())
 					mux.Handle("/api", asm.API.Handler())
@@ -93,7 +95,7 @@ func (a *App) newRunCommand() *cobra.Command {
 				srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 				go func() { _ = srv.Serve(ln) }()
 				defer srv.Close()
-				fmt.Fprintf(out, "listening on %s (read-only API: /api/; reports: /report/v1/events).\n", asm.APIBind)
+				fmt.Fprintf(out, "listening on %s (dashboard /ui/, API /api/, reports /report/v1/events).\n", asm.APIBind)
 			}
 			var wg sync.WaitGroup
 			wg.Add(1)
