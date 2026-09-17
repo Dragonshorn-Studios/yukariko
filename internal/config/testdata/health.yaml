@@ -1,0 +1,26 @@
+schema_version: 1
+apps:
+  - id: api
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: registry.example.com/acme/api:v2
+    deploy:
+      mode: compose
+      compose:
+        work_dir: /srv/api
+        files:
+          - compose.yaml
+    health:
+      http:
+        url: https://api.internal.example.com/healthz
+        headers:
+          - name: Accept
+            value: application/json
+          - name: X-Api-Key
+            secret_ref:
+              file: /etc/yukariko/secrets/api-key
+      docker:
+        required: false
+      command: ["/usr/local/bin/verify-api.sh"]

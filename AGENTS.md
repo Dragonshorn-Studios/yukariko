@@ -29,10 +29,11 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#1):
+Current (#2):
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, command stubs
+- `internal/config` — strict YAML schema, defaults, path-aware validation
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
@@ -40,7 +41,6 @@ Reserved packages (create only when the owning issue lands):
 
 | Package | Issue |
 |---|---|
-| `internal/config` | #2 |
 | `internal/store` | #3 |
 | `internal/runner` | #4 |
 | `internal/docker` | #5–#6 |
@@ -85,7 +85,7 @@ Do not add CI, Makefiles, or extra toolchains unless the current issue requires 
 ## Go conventions
 
 - Module: `github.com/Dragonshorn-Studios/yukariko`
-- Stdlib first. Cobra is the CLI router only; do not add Viper.
+- Stdlib first. Cobra is the CLI router only; do not add Viper. YAML parsing is `gopkg.in/yaml.v3` with `KnownFields(true)` strict decoding (`internal/config`); keep it the only YAML dependency.
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.

@@ -1,0 +1,32 @@
+schema_version: 1
+apps:
+  - id: uptime-kuma
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: louislam/uptime-kuma:1
+    deploy:
+      mode: standalone
+      standalone:
+        image: louislam/uptime-kuma:1
+        name: uptime-kuma
+        env:
+          - name: TZ
+            value: Europe/Berlin
+          - name: KUMA_SECRET
+            secret_ref:
+              env: KUMA_SECRET
+        binds:
+          - /srv/kuma/data:/app/data
+        ports:
+          - 127.0.0.1:3001:3001
+        restart: unless-stopped
+        labels:
+          yukariko.managed: "true"
+        health_check:
+          test: ["CMD", "node", "server/health.js"]
+          interval: 30s
+          timeout: 5s
+          retries: 3
+          start_period: 30s

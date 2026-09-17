@@ -1,0 +1,19 @@
+schema_version: 1
+apps:
+  - id: wiki
+    interval: 2m
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: ghcr.io/example/wiki:latest
+            platform: linux/arm64
+    deploy:
+      mode: compose
+      compose:
+        work_dir: /srv/wiki
+        files:
+          - docker-compose.yml
+        profiles:
+          - full
+        project_name: wiki

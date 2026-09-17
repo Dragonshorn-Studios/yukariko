@@ -1,0 +1,14 @@
+schema_version: 1
+apps:
+  - id: tiny
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: nginx:1.27
+    deploy:
+      mode: compose
+      compose:
+        work_dir: /srv/tiny
+        files:
+          - compose.yaml

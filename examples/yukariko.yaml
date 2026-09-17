@@ -1,0 +1,102 @@
+# Yukariko example configuration.
+#
+# Host Docker, Compose files, and Git repositories remain the source of truth;
+# this file only tells Yukariko what to observe and how to invoke existing
+# local tooling. See docs/config.md for the full schema and defaults.
+schema_version: 1
+
+# Read-only HTTP API and dashboard (off by default; binds to loopback only).
+server:
+  enabled: false
+  bind: 127.0.0.1:8484
+
+# Optional peer status reporting. Reports carry status only, never commands.
+reporting:
+  outbound:
+    enabled: false
+    url: https://yukariko-core.lan:8443/report/v1/events
+    host_id: this-host
+    secret_ref:
+      env: YUKARIKO_REPORT_SECRET
+    heartbeat_interval: 60s
+  inbound:
+    enabled: false
+    require_tls: true
+    hosts: []
+
+retention:
+  events_days: 30
+  health_days: 14
+  deployments_days: 365
+
+limits:
+  command_output_bytes: 65536
+
+apps:
+  # Git checkout deployed through its original Compose project.
+  - id: ghost-blog
+    display_name: Ghost Blog
+    interval: 5m
+    source:
+      mode: git
+      git:
+        dir: /srv/ghost
+        branch: main
+    deploy:
+      mode: compose
+      compose:
+        work_dir: /srv/ghost
+        files:
+          - compose.yaml
+        env_files:
+          - .env
+        project_name: ghost
+    health:
+      interval: 30s
+      http:
+        url: http://127.0.0.1:2368/
+        status: [200, 399]
+      docker:
+        required: true
+
+  # Registry image deployed through Compose, pinned per platform.
+  - id: wiki
+    interval: 10m
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: ghcr.io/example/wiki:latest
+            platform: linux/arm64
+    deploy:
+      mode: compose
+      compose:
+        work_dir: /srv/wiki
+        files:
+          - docker-compose.yml
+        project_name: wiki
+
+  # Standalone container recreated only when its image digest changes.
+  - id: uptime-kuma
+    interval: 15m
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: louislam/uptime-kuma:1
+    deploy:
+      mode: standalone
+      standalone:
+        image: louislam/uptime-kuma:1
+        name: uptime-kuma
+        env:
+          - name: TZ
+            value: Europe/Berlin
+          - name: KUMA_SECRET
+            secret_ref:
+              env: KUMA_SECRET
+        binds:
+          - /srv/kuma/data:/app/data
+        ports:
+          - 127.0.0.1:3001:3001
+        restart: unless-stopped
