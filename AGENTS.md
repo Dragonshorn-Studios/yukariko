@@ -82,6 +82,15 @@ go build -ldflags "-X github.com/Dragonshorn-Studios/yukariko/internal/version.V
 
 Do not add CI, Makefiles, or extra toolchains unless the current issue requires them.
 
+On the Windows ARM64 dev host, Smart App Control may block freshly built test
+binaries that spawn or kill child processes (observed with the runner tests).
+Run the suite through the WSL toolchain instead; WSL Go also supports `-race`,
+which windows/arm64 does not:
+
+```text
+wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukariko && go test ./... && go test -race ./..."
+```
+
 ## Go conventions
 
 - Module: `github.com/Dragonshorn-Studios/yukariko`
