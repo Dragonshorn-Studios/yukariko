@@ -29,11 +29,12 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#2):
+Current (#3):
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, command stubs
 - `internal/config` — strict YAML schema, defaults, path-aware validation
+- `internal/store` — SQLite state/event store, forward-only migrations
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
@@ -41,7 +42,6 @@ Reserved packages (create only when the owning issue lands):
 
 | Package | Issue |
 |---|---|
-| `internal/store` | #3 |
 | `internal/runner` | #4 |
 | `internal/docker` | #5–#6 |
 | `internal/learn` | #7 |
@@ -85,7 +85,7 @@ Do not add CI, Makefiles, or extra toolchains unless the current issue requires 
 ## Go conventions
 
 - Module: `github.com/Dragonshorn-Studios/yukariko`
-- Stdlib first. Cobra is the CLI router only; do not add Viper. YAML parsing is `gopkg.in/yaml.v3` with `KnownFields(true)` strict decoding (`internal/config`); keep it the only YAML dependency.
+- Stdlib first. Cobra is the CLI router only; do not add Viper. YAML parsing is `gopkg.in/yaml.v3` with `KnownFields(true)` strict decoding (`internal/config`); keep it the only YAML dependency. SQLite runs on `modernc.org/sqlite` (pure Go, no cgo) behind `database/sql` (`internal/store`): WAL, busy timeout, forward-only migrations recorded in `schema_migrations` — never edit an applied migration, append a new one.
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.
