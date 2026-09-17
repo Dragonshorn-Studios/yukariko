@@ -29,10 +29,12 @@ func composeCandidate(ctx context.Context, p *docker.ComposeProject, git GitProb
 
 	// One line of image evidence per service; replicas share the service
 	// name, and a replica running a different image is a conflict to
-	// resolve, not a guess to make.
+	// resolve, not a guess to make. A member without an image reference
+	// keeps its service key (with an empty set) so the gap is confirmed,
+	// never silently dropped.
 	perService := map[string]map[string]bool{}
 	for _, c := range p.Containers {
-		if c.Detail == nil || c.Service == "" || c.Detail.ImageRef == "" {
+		if c.Detail == nil || c.Service == "" {
 			continue
 		}
 		set := perService[c.Service]
@@ -40,7 +42,9 @@ func composeCandidate(ctx context.Context, p *docker.ComposeProject, git GitProb
 			set = map[string]bool{}
 			perService[c.Service] = set
 		}
-		set[c.Detail.ImageRef] = true
+		if c.Detail.ImageRef != "" {
+			set[c.Detail.ImageRef] = true
+		}
 	}
 	services := sortedSetKeys(perService)
 	for _, svc := range services {

@@ -217,6 +217,28 @@ func TestStandaloneReproducibleProposal(t *testing.T) {
 	}
 }
 
+func TestComposeServiceWithoutImageReferenceIsConfirmed(t *testing.T) {
+	t.Parallel()
+	// A compose member whose inspect lost the image reference must surface
+	// as a confirmation on its service — never silently disappear.
+	member := composeMember("aaaa1111aaaa", "webapp-web-1", "web", "nginx:1.27", nil)
+	member.Detail.ImageRef = ""
+	report := &docker.Report{
+		Projects: []*docker.ComposeProject{
+			composeProject("webapp", "/srv/webapp", []string{"/srv/webapp/compose.yaml"}, member),
+		},
+	}
+	p := Proposals(context.Background(), report, &fakeGit{})[0]
+	if slices.ContainsFunc(p.Compose.Services, func(s ServiceImage) bool { return s.Service == "web" }) {
+		t.Errorf("Services = %v, want no fabricated image entry", p.Compose.Services)
+	}
+	if !slices.ContainsFunc(p.Confirmations, func(c Confirmation) bool {
+		return c.Field == "deploy.services" && strings.Contains(c.Reason, "service web has no image reference")
+	}) {
+		t.Errorf("Confirmations = %+v, want the missing-image confirmation", p.Confirmations)
+	}
+}
+
 func TestStandaloneMissingRestartPolicyIsImplicitNo(t *testing.T) {
 	t.Parallel()
 	detail := baseStandaloneDetail()
