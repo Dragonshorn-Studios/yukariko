@@ -1,0 +1,32 @@
+schema_version: 1
+apps:
+  - id: ghost-blog
+    display_name: Ghost Blog
+    interval: 5m
+    timeout: 10m
+    retry:
+      base: 30s
+      max: 30m
+    source:
+      mode: git
+      git:
+        dir: /srv/ghost
+        branch: main
+    deploy:
+      mode: compose
+      compose:
+        work_dir: /srv/ghost
+        files:
+          - compose.yaml
+        env_files:
+          - .env
+        project_name: ghost
+    health:
+      required: true
+      interval: 30s
+      http:
+        url: http://127.0.0.1:2368/
+        timeout: 10s
+        status: [200, 399]
+      docker:
+        required: true

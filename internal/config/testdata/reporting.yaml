@@ -1,0 +1,31 @@
+schema_version: 1
+server:
+  enabled: true
+  bind: 127.0.0.1:8484
+reporting:
+  outbound:
+    enabled: true
+    url: https://yukariko-core.lan:8443/report/v1/events
+    host_id: garage-pi
+    secret_ref:
+      env: YUKARIKO_REPORT_SECRET
+    heartbeat_interval: 60s
+  inbound:
+    enabled: true
+    require_tls: true
+    max_body_bytes: 1048576
+    clock_skew: 5m
+    replay_window: 24h
+    rate_limit:
+      events: 60
+      per: 1m
+    hosts:
+      - id: garage-pi
+        keys:
+          - key_id: k1
+            secret_ref:
+              file: /etc/yukariko/secrets/garage-pi-k1
+          - key_id: k2
+            secret_ref:
+              env: GARAGE_PI_K2
+apps: []

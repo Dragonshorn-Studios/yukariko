@@ -53,9 +53,13 @@ The binary currently routes these commands. Each one fails with an explicit `not
 | `logs` | Bounded structured event history |
 | `learn` | Import local Docker/Compose apps into configuration |
 
-Global flags: `--config`, `--data-dir`, `--version`. `--config` and `--data-dir` are parsed only; YAML loading is not implemented yet.
+Global flags: `--config`, `--data-dir`, `--version`. The commands do not consume configuration yet; their issues wire that up.
 
 `yukariko --help` and `yukariko --version` work today.
+
+## Configuration
+
+Yukariko's declarative YAML contract is defined and validated by `internal/config`: strict unknown-field rejection, path-aware validation errors, documented defaults, and secret **references only** (env/file indirection; literal secrets are not representable). See [`docs/config.md`](docs/config.md) for the full schema reference and [`examples/yukariko.yaml`](examples/yukariko.yaml) for a safe starting point.
 
 ## Scope
 
