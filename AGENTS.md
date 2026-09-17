@@ -29,7 +29,7 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#10):
+Current (#13):
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, `learn` command, command stubs
@@ -41,6 +41,7 @@ Current (#10):
 - `internal/learn` — proposals + interactive import flow (diff, merge, backup, atomic write)
 - `internal/schedule` — per-app loops, state machine, locks, backoff, preflight
 - `internal/registry` — OCI/Distribution digest resolution (auth, platform, typed errors)
+- `internal/health` — HTTP/docker/command probes, post-deploy checks, independent monitor
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
@@ -104,6 +105,7 @@ wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukar
 - Scheduler control plane (`#8`): one loop goroutine per app; a global semaphore caps concurrent check→deploy passes (default 2); a keyed per-app lock serializes scheduled and manual passes (scheduled = try-and-skip, manual = queue with timeout). The explicit state machine (`idle/checking/preflight/deploying/postchecks/succeeded/failed/backoff/interrupted`) lives in `internal/schedule`; transitions are validated and every outcome is an event for the #3 store. Cancellation marks a pass interrupted and can never record success, so a cancelled pass cannot advance the deployed version. Timing goes through the injectable `Clock`; jitter (default ≤ 1/10) applies to intervals and backoff (`retry.base/max`). Source checks and deployments are `Checker`/`Deployer` seams implemented by #9–#12; preflight gates deployment (binaries, Docker reachability, compose/git context, secret-ref resolvability, data-dir writability) while observation stays available. Reporting is never on the critical path.
 - Git update policy (`#9`): `internal/git` polls `ls-remote`, fetches only when the remote is actually ahead (fetch updates remote-tracking refs, never the worktree), and prepares deployments with `merge --ff-only` after re-validating dirty/detached/diverged conditions. `git reset --hard` and every lossy or history-rewriting command are forbidden — divergence is blocked with an actionable reason, never auto-resolved. The observed SHA is informational; only the deploy pipeline's success checkpoint (#11) advances the deployed SHA. Remote URLs never enter results: details name remotes by configured name, and command output is runner-redacted before use.
 - Registry resolution (`#10`): `internal/registry` speaks OCI/Distribution v2 over stdlib HTTP — no registry SDK. Docker Hub aliases normalize onto registry-1.docker.io; loopback registries use plain http; everything else is https. Auth is Docker's own token flow with credentials delegated to `~/.docker/config.json` (`auths`, `credsStore`, `credHelpers` → `docker-credential-*` over the runner with bounded stdin); credentials live in memory only and never reach YAML, SQLite, logs, or errors. Token realms must be https or loopback http — an injected challenge can never redirect credentials. Manifest bodies are digest-verified against `Docker-Content-Digest` (mismatch = malformed); multi-arch indexes resolve to the deterministic platform digest (`os/arch[/variant]`). Failures are typed and carry a Retryable flag for the #8 backoff; the resolver never retries internally and never pulls images — a successful lookup is never a deployed version.
+- Health is observation only (`#13`): `internal/health` probes HTTP (call-time SecretRef headers, query-less URL rendering, bounded diagnostics), Docker health via the read-only #5 interface (standalone container names only in this build), and explicitly configured commands. `RunPostDeployChecks` failing a required check fails the deployment — the caller must not advance SHA/digest. The monitor records samples every tick and transitions only on state change, backing off up to 4× the interval on consecutive errors; there is no restart or rollback path anywhere.
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.
