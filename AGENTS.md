@@ -29,10 +29,11 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#12):
+Current (#14):
 
 - `cmd/yukariko` — process entry, signal context, process exit
-- `internal/cli` — cobra routing, global flags, `learn` command, command stubs
+- `internal/cli` — cobra routing, global flags, all operational commands + themed aliases
+- `internal/daemon` — component assembly, source/deploy dispatch, store adapters
 - `internal/config` — strict YAML schema, defaults, path-aware validation, round-trippable rendering
 - `internal/store` — SQLite state/event store, forward-only migrations
 - `internal/runner` — argv-based controlled command runner with redaction, bounded stdin support
@@ -109,6 +110,7 @@ wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukar
 - Health is observation only (`#13`): `internal/health` probes HTTP (call-time SecretRef headers, query-less URL rendering, bounded diagnostics), Docker health via the read-only #5 interface (standalone container names only in this build), and explicitly configured commands. `RunPostDeployChecks` failing a required check fails the deployment — the caller must not advance SHA/digest. The monitor records samples every tick and transitions only on state change, backing off up to 4× the interval on consecutive errors; there is no restart or rollback path anywhere.
 - Compose deploys (`#11`): `internal/deploy.ComposePipeline` runs every command with the exact configured context (`-f` files in override order, `--env-file`, `--profile`, `-p`, workdir as the command's Dir) — compose stays the source of truth and nothing is reconstructed. Registry apps: resolve expected digests → `pull` → verify local RepoDigests contain each expected manifest digest → `up -d --wait`; git apps: `git.Prepare` → configured pre/deploy/post steps (empty deploy list defaults to `up -d --build --wait`). Order: commands → required health checks (`#13`) → exactly one `VersionCheckpoint.MarkDeployed`; any failure or cancellation leaves the deployed version untouched, and the pipeline refuses to run without a checkpoint (fail closed).
 - Standalone recreation (`#12`): `internal/deploy.StandalonePipeline` runs resolve → pull+verify → refusal preflight (compose-managed, privileged, shared pid/ipc namespaces, env names missing from the spec, healthcheck absent from the spec — all refused BEFORE stopping) → stop old → rename old to `<name>-yukariko-old-<ts>` → `docker run` from the exact golden argv → connect extra networks → required health checks → remove old → checkpoint the resolved digest. Unchanged digests are a no-op; a first-time creation (no existing container) skips stop/rename/remove. Failures after the stop stage leave the old container stopped under its backup name with the manual recovery command in the error — no automatic rollback exists, and secret values travel only through the runner environment.
+- Daemon wiring (`#14`): `internal/daemon.Assemble` builds every component and the store adapters; `SourceChecker` routes git/registry checks and records observations (kind `git_sha`, or `digest:<canonical ref>` per image) separately from deployed versions; `DeployDispatcher` opens a deployment row per run and binds its checkpoint to `CommitDeploymentSuccess` — the only path that advances the deployed version. Commands `run/check/update/status/logs` each have a themed alias implemented as the same cobra command (behaviorally identical by construction); `check` never deploys, `update --dry-run` runs check+preflight only, and all commands require `--config` plus a data dir (default `./data`).
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.
