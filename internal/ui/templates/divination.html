@@ -1,0 +1,22 @@
+{{define "content"}}
+<h1>Divination</h1>
+<p>Health readings: HTTP probes, Docker health, and commands, each with its
+own state and timestamp. An unhealthy reading never restarts anything.</p>
+<table>
+<caption>Current health readings</caption>
+<thead><tr><th scope="col">App</th><th scope="col">Check</th><th scope="col">State</th><th scope="col">Reason</th><th scope="col">Checked</th></tr></thead>
+<tbody>
+{{range .Data.rows}}
+<tr>
+  <th scope="row">{{.app}}</th>
+  <td>{{.check}}</td>
+  <td><span class="badge {{.cls}}">{{.state}}</span></td>
+  <td>{{.reason}}</td>
+  <td>{{.when}}</td>
+</tr>
+{{else}}
+<tr><td colspan="5">No health checks configured.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}

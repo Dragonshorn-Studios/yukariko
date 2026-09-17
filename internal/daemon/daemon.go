@@ -26,6 +26,7 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/report"
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
+	"github.com/Dragonshorn-Studios/yukariko/internal/ui"
 	"net/http"
 	"os"
 
@@ -72,6 +73,8 @@ type Assembled struct {
 	// Reporter is non-nil when outbound reporting is enabled; the daemon
 	// runs its drain loop and local sinks enqueue through it.
 	Reporter *report.Reporter
+	// UI is the embedded read-only dashboard; always present.
+	UI http.Handler
 }
 
 // Assemble opens the store, builds every component, and wires the
@@ -147,6 +150,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Sink:    &healthSink{store: st, reporter: reporter},
 	}
 	reportHandler := reportHandlerFor(opts.Config, st)
+	uiServer := &ui.Server{Store: st, Config: opts.Config}
 	var api *httpapi.Server
 	apiBind := ""
 	if opts.Config.Server.Enabled {
@@ -167,6 +171,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Preflight: schedOpts.Preflight,
 		Docker:    dockerClient,
 		API:       api,
+		UI:        uiServer.Handler(),
 		APIBind:   apiBind,
 		APIOn:     api != nil,
 
