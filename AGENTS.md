@@ -29,7 +29,7 @@ Non-goals (do not implement): Coolify, Portainer, Traefik/proxy management, Kube
 
 ## Layout
 
-Current (#13):
+Current (#11):
 
 - `cmd/yukariko` — process entry, signal context, process exit
 - `internal/cli` — cobra routing, global flags, `learn` command, command stubs
@@ -42,6 +42,7 @@ Current (#13):
 - `internal/schedule` — per-app loops, state machine, locks, backoff, preflight
 - `internal/registry` — OCI/Distribution digest resolution (auth, platform, typed errors)
 - `internal/health` — HTTP/docker/command probes, post-deploy checks, independent monitor
+- `internal/deploy` — compose pipeline (#11); standalone recreation (#12)
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
@@ -106,6 +107,7 @@ wsl.exe -e bash -lc "export PATH=/usr/local/go/bin:$PATH && cd /mnt/e/apps/yukar
 - Git update policy (`#9`): `internal/git` polls `ls-remote`, fetches only when the remote is actually ahead (fetch updates remote-tracking refs, never the worktree), and prepares deployments with `merge --ff-only` after re-validating dirty/detached/diverged conditions. `git reset --hard` and every lossy or history-rewriting command are forbidden — divergence is blocked with an actionable reason, never auto-resolved. The observed SHA is informational; only the deploy pipeline's success checkpoint (#11) advances the deployed SHA. Remote URLs never enter results: details name remotes by configured name, and command output is runner-redacted before use.
 - Registry resolution (`#10`): `internal/registry` speaks OCI/Distribution v2 over stdlib HTTP — no registry SDK. Docker Hub aliases normalize onto registry-1.docker.io; loopback registries use plain http; everything else is https. Auth is Docker's own token flow with credentials delegated to `~/.docker/config.json` (`auths`, `credsStore`, `credHelpers` → `docker-credential-*` over the runner with bounded stdin); credentials live in memory only and never reach YAML, SQLite, logs, or errors. Token realms must be https or loopback http — an injected challenge can never redirect credentials. Manifest bodies are digest-verified against `Docker-Content-Digest` (mismatch = malformed); multi-arch indexes resolve to the deterministic platform digest (`os/arch[/variant]`). Failures are typed and carry a Retryable flag for the #8 backoff; the resolver never retries internally and never pulls images — a successful lookup is never a deployed version.
 - Health is observation only (`#13`): `internal/health` probes HTTP (call-time SecretRef headers, query-less URL rendering, bounded diagnostics), Docker health via the read-only #5 interface (standalone container names only in this build), and explicitly configured commands. `RunPostDeployChecks` failing a required check fails the deployment — the caller must not advance SHA/digest. The monitor records samples every tick and transitions only on state change, backing off up to 4× the interval on consecutive errors; there is no restart or rollback path anywhere.
+- Compose deploys (`#11`): `internal/deploy.ComposePipeline` runs every command with the exact configured context (`-f` files in override order, `--env-file`, `--profile`, `-p`, workdir as the command's Dir) — compose stays the source of truth and nothing is reconstructed. Registry apps: resolve expected digests → `pull` → verify local RepoDigests contain each expected manifest digest → `up -d --wait`; git apps: `git.Prepare` → configured pre/deploy/post steps (empty deploy list defaults to `up -d --build --wait`). Order: commands → required health checks (`#13`) → exactly one `VersionCheckpoint.MarkDeployed`; any failure or cancellation leaves the deployed version untouched, and the pipeline refuses to run without a checkpoint (fail closed).
 - Source files must be UTF-8 without a BOM. Go rejects UTF-16.
 - `log/slog` for logs. Redact secrets and credential-bearing URLs.
 - Table-driven tests. Fake host dependencies; do not require live Docker/Git in unit tests.
