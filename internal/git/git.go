@@ -280,9 +280,13 @@ func (c *Client) fetch(ctx context.Context, dir, remote, branch string) error {
 	return err
 }
 
-// isDirty reports uncommitted changes (staged, unstaged, or untracked).
+// isDirty reports modifications to tracked files (staged or unstaged).
+// Untracked files are common in real worktrees (compose overrides, local
+// config) and cannot conflict with a fast-forward that does not touch them;
+// if one ever would, the merge itself refuses safely and the pass fails
+// without data loss.
 func (c *Client) isDirty(ctx context.Context, dir string) (bool, error) {
-	out, err := c.git(ctx, dir, localTimeout, "status", "--porcelain")
+	out, err := c.git(ctx, dir, localTimeout, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return false, err
 	}

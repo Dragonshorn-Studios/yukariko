@@ -200,7 +200,7 @@ func TestDeployDispatcherCommitsAndFailsTransactionally(t *testing.T) {
 	dispatcher := &DeployDispatcher{
 		store:    st,
 		runner:   runnerSvc,
-		registry: &registry.Resolver{EndpointOverride: map[string]string{host: srv.URL}},
+		Registry: &registry.Resolver{EndpointOverride: map[string]string{host: srv.URL}},
 	}
 
 	// The compose pipeline runs real `docker compose` through the runner

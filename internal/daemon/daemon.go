@@ -49,6 +49,8 @@ type Options struct {
 	Preflight *schedule.Preflight
 	// PipelineRun overrides deploy-pipeline command execution (tests).
 	PipelineRun func(ctx context.Context, req runner.Request) (runner.Result, error)
+	// Engine overrides the standalone mutation engine (tests).
+	Engine deploy.Engine
 }
 
 // Assembled is the wired application.
@@ -121,10 +123,11 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		store:       st,
 		runner:      runnerSvc,
 		docker:      opts.Docker,
+		Engine:      opts.Engine,
 		git:         gitClient,
-		registry:    registryClient,
-		health:      healthSvc,
-		platform:    opts.Platform,
+		Registry:    registryClient,
+		Health:      healthSvc,
+		Platform:    opts.Platform,
 		pipelineRun: opts.PipelineRun,
 	}
 
@@ -299,10 +302,11 @@ type DeployDispatcher struct {
 	store       *store.Store
 	runner      *runner.Runner
 	docker      docker.Client // test override for the standalone engine
+	Engine      deploy.Engine // DI override; nil uses the CLI engine
 	git         *git.Client
-	registry    *registry.Resolver
-	health      *health.Service
-	platform    string
+	Registry    *registry.Resolver
+	Health      *health.Service
+	Platform    string
 	pipelineRun func(ctx context.Context, req runner.Request) (runner.Result, error)
 }
 
@@ -327,16 +331,20 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 			Runner:     d.runner,
 			Run:        d.pipelineRun,
 			Git:        d.git,
-			Health:     d.health,
-			Registry:   d.registry,
+			Health:     d.Health,
+			Registry:   d.Registry,
 			Checkpoint: checkpoint,
-			Platform:   d.platform,
+			Platform:   d.Platform,
 		}
 	case config.DeployStandalone:
+		engine := d.Engine
+		if engine == nil {
+			engine = &deploy.CLIEngine{Docker: d.dockerClient(), Runner: d.runner}
+		}
 		dep = &deploy.StandalonePipeline{
-			Engine:     &deploy.CLIEngine{Docker: d.dockerClient(), Runner: d.runner},
-			Registry:   d.registry,
-			Health:     d.health,
+			Engine:     engine,
+			Registry:   d.Registry,
+			Health:     d.Health,
 			Checkpoint: checkpoint,
 			Runner:     d.runner,
 			Run:        d.pipelineRun,

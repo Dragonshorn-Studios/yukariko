@@ -1,0 +1,54 @@
+# Hardened systemd unit for the Yukariko daemon.
+#
+# SECURITY NOTE — unavoidable Docker-equivalent privilege: Yukariko talks to
+# the Docker daemon to deploy and observe containers. Anything with Docker
+# access can mount arbitrary host paths and run privileged containers, i.e.
+# act as root. Run this unit under a dedicated account whose ONLY notable
+# grant is docker-group membership, and never reuse it for anything else.
+# See docs/docker-access.md.
+
+[Unit]
+Description=Yukariko deploy agent
+Documentation=https://github.com/Dragonshorn-Studios/yukariko
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=yukariko
+Group=yukariko
+ExecStart=/usr/local/bin/yukariko run --config /etc/yukariko/yukariko.yaml --data-dir /var/lib/yukariko
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# Filesystem hardening: only the state directory is writable.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/yukariko
+ProtectHome=yes
+PrivateTmp=yes
+NoExecPaths=/var/lib/yukariko
+
+# Kernel and capability hardening.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+PrivateDevices=yes
+PrivateUsers=no
+
+[Install]
+WantedBy=multi-user.target
