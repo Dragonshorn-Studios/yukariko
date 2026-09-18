@@ -88,10 +88,16 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	if err := os.MkdirAll(opts.DataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
+	// A root CLI pass sharing the service user's data dir must not leave
+	// root-owned store files behind. Heal before Open — files an unclean
+	// earlier root run left would make Open itself fail before we could
+	// fix them — and again after, for whatever Open created as root.
+	healRootOwnedStoreFiles(opts.DataDir)
 	st, err := store.Open(opts.DataDir)
 	if err != nil {
 		return nil, err
 	}
+	healRootOwnedStoreFiles(opts.DataDir)
 	// Startup retention cleanup; failures are non-fatal (bounded best effort).
 	_, _ = st.Cleanup(ctx, store.RetentionPolicy{
 		EventsDays:      opts.Config.Retention.EventsDays,

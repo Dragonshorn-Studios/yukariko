@@ -20,25 +20,20 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 )
 
-// defaultDataDir is where the durable store lives when --data-dir is unset.
-const defaultDataDir = "data"
-
 // daemonOptions builds the assembly options from the global flags plus the
-// test hook. Every store-backed command requires --config: apps and their
-// settings come only from validated configuration.
+// test hook. Configuration comes only from validated configuration files;
+// a root invocation on Linux falls back to the installer's system layout
+// (see defaults.go) when the flags are omitted.
 func (a *App) daemonOptions() (daemon.Options, error) {
-	if a.opts.Config == "" {
-		return daemon.Options{}, fmt.Errorf("--config is required: %w", errUsage)
-	}
-	cfg, err := config.Load(a.opts.Config)
+	configPath, err := a.configPathFor()
 	if err != nil {
 		return daemon.Options{}, err
 	}
-	dataDir := a.opts.DataDir
-	if dataDir == "" {
-		dataDir = defaultDataDir
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return daemon.Options{}, err
 	}
-	opts := daemon.Options{Config: cfg, DataDir: dataDir}
+	opts := daemon.Options{Config: cfg, DataDir: a.dataDirFor()}
 	if a.daemonHook != nil {
 		a.daemonHook(&opts)
 	}

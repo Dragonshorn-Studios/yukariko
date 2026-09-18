@@ -6,6 +6,12 @@
 # act as root. Run this unit under a dedicated account whose ONLY notable
 # grant is docker-group membership, and never reuse it for anything else.
 # See docs/docker-access.md.
+#
+# GIT-SOURCE APPS — this unit is strict on purpose: only /var/lib/yukariko
+# is writable and /home is inaccessible, but git sources write to their
+# worktrees (fetch updates .git, the ff-only merge updates the tree). Expose
+# each worktree via a drop-in: scripts/install.sh --read-write <dir> or see
+# docs/operations.md ("Git-source apps under systemd").
 
 [Unit]
 Description=Yukariko deploy agent

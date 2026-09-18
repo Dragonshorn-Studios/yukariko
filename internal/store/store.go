@@ -30,11 +30,15 @@ type Store struct {
 	db *sql.DB
 }
 
+// DBFileName is the SQLite database file Yukariko creates inside the data
+// directory (WAL sidecars append -wal/-shm to this name).
+const DBFileName = "yukariko.db"
+
 // Open opens (creating if needed) the Yukariko database in dataDir and
 // applies pending migrations. WAL mode is enabled deliberately so readers
 // (status API, dashboard) never block while the scheduler records events.
 func Open(dataDir string) (*Store, error) {
-	path := filepath.ToSlash(filepath.Join(dataDir, "yukariko.db"))
+	path := filepath.ToSlash(filepath.Join(dataDir, DBFileName))
 	// busy_timeout keeps concurrent writers from failing fast under
 	// contention; synchronous=NORMAL is the standard WAL durability trade.
 	dsn := "file:" + escapeDSNPath(path) +

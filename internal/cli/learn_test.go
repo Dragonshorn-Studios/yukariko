@@ -397,6 +397,9 @@ func TestLearnSystemCandidatesExcludedByDefault(t *testing.T) {
 func TestLearnRequiresConfigFlag(t *testing.T) {
 	t.Parallel()
 	app := NewApp()
+	// Pinned to a non-root uid so the root-default contract cannot change
+	// the outcome when the suite runs as root.
+	app.euid = func() int { return 1000 }
 	stdout := &strings.Builder{}
 	err := app.Execute(context.Background(), []string{"learn"}, stdout, &strings.Builder{})
 	if err == nil {

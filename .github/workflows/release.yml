@@ -42,8 +42,9 @@ jobs:
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
       - name: Build release binaries
         run: scripts/build-release.sh "${VERSION}" dist linux/amd64 linux/arm64
-      - name: Package tarballs and checksums
+      - name: Package tarballs, unit, and checksums
         run: |
+          cp deploy/yukariko.service dist/
           cd dist
           for BIN in yukariko-*; do
             [ -f "${BIN}" ] || continue
@@ -52,7 +53,7 @@ jobs:
           done
           # Checksums over exactly the uploaded artifacts, so users who
           # download one tarball can verify with --ignore-missing.
-          sha256sum ./*.tar.gz > SHA256SUMS
+          sha256sum ./*.tar.gz ./yukariko.service > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: release-dist
