@@ -65,8 +65,9 @@ and owned by its user:
 Under the shipped unit, `ProtectHome=yes` makes `/run/user` inaccessible
 entirely: a rootless endpoint needs the drop-in described in
 [`operations.md`](operations.md). `Requires=docker.service` also assumes
-the system daemon; on a rootless-only host, drop that requirement with a
-unit drop-in (`[Unit]\nUnsetRequires=docker.service` or a custom unit).
+the system daemon; on a rootless-only host, remove that requirement with a
+drop-in containing `[Unit]` and an empty `Requires=` line (an empty
+assignment resets the list).
 
 `learn` scans the default daemon plus every additional **local** Docker
 context (remote `ssh://`/`tcp://` endpoints are skipped — Yukariko is a
