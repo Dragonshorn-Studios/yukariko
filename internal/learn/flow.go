@@ -104,6 +104,9 @@ func RunFlow(ctx context.Context, opts FlowOptions) (FlowResult, error) {
 		}
 		if skipReason != "" {
 			f.skips = append(f.skips, p.ID+": "+skipReason)
+			// Never skip silently: the operator selected this candidate and
+			// must see why it did not import.
+			fmt.Fprintf(opts.Stdout, "%s skipped: %s\n", p.ID, skipReason)
 			continue
 		}
 		apps = append(apps, app)

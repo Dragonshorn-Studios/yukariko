@@ -73,7 +73,18 @@ func composeCandidate(ctx context.Context, p *docker.ComposeProject, git GitProb
 		info, err := git.Probe(ctx, p.WorkDir)
 		switch {
 		case err != nil:
-			pr.confirm("source.mode", fmt.Sprintf("git detection failed for %s: %v", p.WorkDir, err))
+			// A failed probe (permissions, corrupted repo) must not dead-end
+			// the candidate: fall back to the registry proposal, with the
+			// failure on record so the user knows why git was not detected.
+			pr.Compose.SourceMode = config.SourceRegistry
+			for _, svc := range services {
+				if images := sortedSetKeys(perService[svc]); len(images) > 0 {
+					pr.Compose.RegistryImages = append(pr.Compose.RegistryImages, images[0])
+				}
+			}
+			pr.confirm("source.mode",
+				fmt.Sprintf("git detection failed for %s (%v); proposing registry tracking of the observed images — "+
+					"confirm they are pulled from a registry and not built locally", p.WorkDir, err))
 		case !info.InWorkTree:
 			pr.Compose.SourceMode = config.SourceRegistry
 			for _, svc := range services {

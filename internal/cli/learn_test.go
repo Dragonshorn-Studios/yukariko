@@ -33,9 +33,15 @@ func (f *fakeDocker) InspectContainer(ctx context.Context, id string) (docker.Co
 	return docker.ContainerDetail{}, fmt.Errorf("no such container: %w", docker.ErrContainerMissing)
 }
 
-type fakeGit struct{ byDir map[string]learn.GitInfo }
+type fakeGit struct {
+	byDir map[string]learn.GitInfo
+	err   error
+}
 
 func (f *fakeGit) Probe(ctx context.Context, dir string) (learn.GitInfo, error) {
+	if f.err != nil {
+		return learn.GitInfo{}, f.err
+	}
 	return f.byDir[dir], nil
 }
 
@@ -408,4 +414,74 @@ func TestLearnRequiresConfigFlag(t *testing.T) {
 	if Code(err) != exitcode.Usage {
 		t.Errorf("exit %d, want usage", Code(err))
 	}
+}
+
+// maomaoFixture is a compose candidate on a user-owned worktree whose git
+// probe fails (the sudo "dubious ownership" case).
+func maomaoFixture() (*fakeDocker, *fakeGit) {
+	client := &fakeDocker{
+		summaries: []docker.ContainerSummary{
+			{ID: "aaaa1111aaaa", Name: "maomao-web-1", Image: "ghcr.io/x/maomao:1", State: "running"},
+		},
+		details: map[string]docker.ContainerDetail{
+			"aaaa1111aaaa": {
+				ID: "aaaa1111aaaa", Name: "maomao-web-1", ImageRef: "ghcr.io/x/maomao:1",
+				State: "running", Running: true,
+				Labels: map[string]string{
+					docker.LabelProject:     "maomao",
+					docker.LabelService:     "web",
+					docker.LabelWorkDir:     "/home/u/.maomao",
+					docker.LabelConfigFiles: "/home/u/.maomao/compose.yaml",
+				},
+			},
+		},
+	}
+	return client, &fakeGit{err: errors.New("fatal: detected dubious ownership")}
+}
+
+// The user-facing bug: after selecting the candidate, the flow printed
+// nothing and skipped silently. The registry fallback must prompt, and a
+// decline must say why the import did not happen.
+func TestLearnProbeErrorRegistryFallbackFlow(t *testing.T) {
+	t.Run("decline prints the skip reason", func(t *testing.T) {
+		client, git := maomaoFixture()
+		app := NewApp()
+		app.dockerClient = client
+		app.gitProber = git
+		path := writeConfig(t, "schema_version: 1\napps: []\n")
+		out, code, err := runLearn(t, app, path, "1\nn\n")
+		if err != nil || code != exitcode.OK {
+			t.Fatalf("learn = %v (code %d)", err, code)
+		}
+		for _, want := range []string{
+			"Track the observed images from a registry?",
+			"maomao skipped: registry tracking declined",
+			"nothing selected to import.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("confirm imports registry mode", func(t *testing.T) {
+		client, git := maomaoFixture()
+		app := NewApp()
+		app.dockerClient = client
+		app.gitProber = git
+		path := writeConfig(t, "schema_version: 1\napps: []\n")
+		out, code, err := runLearn(t, app, path, "1\ny\ny\n") // select, registry confirm, write
+		if err != nil || code != exitcode.OK {
+			t.Fatalf("learn = %v (code %d)\n%s", err, code, out)
+		}
+		written, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"mode: registry", "ghcr.io/x/maomao:1", "/home/u/.maomao/compose.yaml"} {
+			if !strings.Contains(string(written), want) {
+				t.Errorf("config missing %q:\n%s", want, written)
+			}
+		}
+	})
 }

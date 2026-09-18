@@ -571,3 +571,36 @@ func TestProposalStringFormsCarryNoEnvValues(t *testing.T) {
 		t.Error("an environment value shape leaked into the proposal")
 	}
 }
+
+// A failed git probe (root probing a user-owned worktree hits git's
+// "dubious ownership" refusal) must fall back to the registry proposal,
+// not dead-end the candidate as unresolvable.
+func TestProbeFailureFallsBackToRegistry(t *testing.T) {
+	t.Parallel()
+	report := &docker.Report{
+		Projects: []*docker.ComposeProject{
+			composeProject("maomao", "/home/u/.maomao", []string{"/home/u/.maomao/compose.yaml"},
+				composeMember("aaaa1111aaaa", "maomao-web-1", "web", "ghcr.io/x/maomao:1", nil),
+			),
+		},
+	}
+	proposals := Proposals(context.Background(), report,
+		&fakeGit{err: errors.New("fatal: detected dubious ownership in repository at '/home/u/.maomao'")})
+	if len(proposals) != 1 {
+		t.Fatalf("proposals = %d, want 1", len(proposals))
+	}
+	p := proposals[0]
+	if p.Compose.SourceMode != config.SourceRegistry {
+		t.Fatalf("source mode = %q, want registry fallback", p.Compose.SourceMode)
+	}
+	if len(p.Compose.RegistryImages) != 1 || p.Compose.RegistryImages[0] != "ghcr.io/x/maomao:1" {
+		t.Fatalf("registry images = %+v, want the observed image", p.Compose.RegistryImages)
+	}
+	if !slices.ContainsFunc(p.Confirmations, func(c Confirmation) bool {
+		return c.Field == "source.mode" &&
+			strings.Contains(c.Reason, "registry tracking") &&
+			strings.Contains(c.Reason, "dubious ownership")
+	}) {
+		t.Errorf("confirmations = %+v, want the registry fallback confirmation naming the probe failure", p.Confirmations)
+	}
+}
