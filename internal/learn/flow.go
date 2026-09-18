@@ -348,7 +348,7 @@ func (f *flow) scan(ctx context.Context) ([]*Proposal, error) {
 			}
 			// Additional endpoints are opportunistic: an unreachable
 			// rootless daemon must not block learning the default one.
-			fmt.Fprintf(f.opts.Stdout, "skipping docker context %q: %v\n", scan.Endpoint.Name, err)
+			fmt.Fprintf(f.opts.Stdout, "skipping docker endpoint %q: %v\n", scan.Endpoint.Name, err)
 			continue
 		}
 		var endpoint *config.DockerEndpoint

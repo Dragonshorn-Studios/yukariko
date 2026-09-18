@@ -91,7 +91,7 @@ func TestScanSkipsUnreachableEndpoint(t *testing.T) {
 	if len(proposals) != 1 || proposals[0].ID != "web" {
 		t.Fatalf("proposals = %v", idsOf(proposals))
 	}
-	if !strings.Contains(out.String(), `skipping docker context "down"`) {
+	if !strings.Contains(out.String(), `skipping docker endpoint "down"`) {
 		t.Fatalf("no skip note; output = %q", out.String())
 	}
 }
