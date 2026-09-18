@@ -107,12 +107,23 @@ func TestRunArgsGoldenPerOption(t *testing.T) {
 				"--env", "API_KEY",
 				"app:1"},
 		},
+		{
+			name: "endpoint flags sit after the binary",
+			spec: &config.StandaloneSpec{Image: "app:1", Name: "app-1"},
+			want: []string{"docker", "--context", "rootless", "run", "-d", "--name", "app-1", "app:1"},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			argv, _ := runArgs(tc.spec)
+			// Endpoint flags only appear for the flagged case; the rest pin
+			// the default-daemon argv byte for byte.
+			flags := []string(nil)
+			if tc.name == "endpoint flags sit after the binary" {
+				flags = []string{"--context", "rootless"}
+			}
+			argv, _ := runArgs(tc.spec, flags)
 			if strings.Join(argv, "|") != strings.Join(tc.want, "|") {
 				t.Errorf("argv =\n  %v\nwant\n  %v", argv, tc.want)
 			}

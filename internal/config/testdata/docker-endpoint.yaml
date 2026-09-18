@@ -1,0 +1,36 @@
+schema_version: 1
+
+# Machine-wide Docker endpoint: a rootless daemon socket. Any app without
+# its own docker block inherits this.
+docker:
+  host: unix:///run/user/1000/docker.sock
+
+apps:
+  # Inherits the global rootless endpoint.
+  - id: inherits-global
+    interval: 5m
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: nginx:1
+    deploy:
+      mode: standalone
+      standalone:
+        image: nginx:1
+        name: inherits-global
+
+  # Targets a different daemon by named context instead.
+  - id: named-context
+    docker:
+      context: rootless
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: nginx:1
+    deploy:
+      mode: standalone
+      standalone:
+        image: nginx:1
+        name: named-context

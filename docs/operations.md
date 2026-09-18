@@ -79,6 +79,16 @@ It also accepts rootless Docker sockets
 (`sudo yukariko expose /run/user/<uid>/docker.sock`); the installer
 suggests this when it detects rootless sockets on the host.
 
+**Rootless Docker endpoints** need the same treatment: `ProtectHome=yes`
+blocks `/run/user` entirely, so expose the daemon's socket the same way
+(`sudo yukariko expose /run/user/<uid>/docker.sock`) and ensure the socket
+exists at boot with `loginctl enable-linger <user>`. The `yukariko`
+service user must be able to reach that socket — see
+[`docker-access.md`](docker-access.md) for the permission realities, and
+point the daemon at it via the `docker.host` endpoint in the config. On a
+rootless-only host you may also want a drop-in removing the unit's
+`Requires=docker.service` (it assumes the system daemon).
+
 ## Upgrades
 
 - Replace the binary (same path), then `systemctl restart yukariko`.

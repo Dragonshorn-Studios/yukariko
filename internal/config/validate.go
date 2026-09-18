@@ -34,6 +34,7 @@ func (c *Config) Validate() error {
 	if c.Limits.CommandOutputBytes < 1024 {
 		v.errorf("limits.command_output_bytes", "must be at least 1024 bytes")
 	}
+	validateDockerEndpoint(v, "docker", c.Docker)
 	validateReporting(v, &c.Reporting)
 
 	seenIDs := make(map[string]bool, len(c.Apps))
@@ -53,6 +54,7 @@ func (c *Config) Validate() error {
 		if a.Retry.Max < a.Retry.Base {
 			v.errorf(path+".retry.max", "must be greater than or equal to retry.base")
 		}
+		validateDockerEndpoint(v, path+".docker", a.Docker)
 		validateSource(v, path, a)
 		validateDeploy(v, path, a)
 		validateSteps(v, path, a)
@@ -69,6 +71,32 @@ func (c *Config) Validate() error {
 		}
 	}
 	return v.err()
+}
+
+// validateDockerEndpoint checks the exactly-one-of rule for context/host
+// and the host URL shape. A context name itself is not checked against
+// `docker context ls` here: config loading stays side-effect free, and a
+// missing context surfaces at use time with a docker CLI error.
+func validateDockerEndpoint(v *validator, path string, e *DockerEndpoint) {
+	if e == nil {
+		return
+	}
+	if e.Context != "" && e.Host != "" {
+		v.errorf(path, "must set exactly one of context or host, both are set")
+		return
+	}
+	if e.Host != "" && !validDockerHost(e.Host) {
+		v.errorf(path+".host", "must be a unix://, tcp://, ssh://, or npipe:// endpoint URL, got %q", e.Host)
+	}
+}
+
+func validDockerHost(h string) bool {
+	for _, prefix := range []string{"unix://", "tcp://", "ssh://", "npipe://"} {
+		if strings.HasPrefix(h, prefix) && len(h) > len(prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateSource(v *validator, path string, a *App) {

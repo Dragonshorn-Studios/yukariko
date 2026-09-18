@@ -63,9 +63,20 @@ type StandalonePipeline struct {
 	Now func() time.Time
 	// Platform resolves registry images when an image carries no platform.
 	Platform string
+	// DefaultEndpoint is the configuration-wide Docker endpoint applied to
+	// apps without their own docker block (rootless/multi-daemon hosts).
+	DefaultEndpoint *config.DockerEndpoint
 }
 
 var _ schedule.Deployer = (*StandalonePipeline)(nil)
+
+// endpointFlags resolves the docker CLI global flags for one app.
+func (p *StandalonePipeline) endpointFlags(app *config.App) []string {
+	if app.Docker != nil {
+		return app.Docker.Flags()
+	}
+	return p.DefaultEndpoint.Flags()
+}
 
 // Deploy implements schedule.Deployer for standalone apps.
 func (p *StandalonePipeline) Deploy(ctx context.Context, app *config.App) (schedule.DeployResult, error) {
@@ -148,7 +159,7 @@ func (p *StandalonePipeline) Deploy(ctx context.Context, app *config.App) (sched
 		}
 	}
 
-	argv, env := runArgs(spec)
+	argv, env := runArgs(spec, p.endpointFlags(app))
 	env = append(env, runEnv...)
 	if err := p.Engine.Run(ctx, argv, env); err != nil {
 		return schedule.DeployResult{Success: false},
@@ -188,10 +199,13 @@ func (p *StandalonePipeline) Deploy(ctx context.Context, app *config.App) (sched
 }
 
 // runArgs builds the deterministic `docker run` argv and the extra
-// environment for secret references. See the package documentation for the
-// documented entrypoint/healthcheck limitations.
-func runArgs(spec *config.StandaloneSpec) (argv []string, env []string) {
-	argv = []string{"docker", "run", "-d", "--name", spec.Name}
+// environment for secret references. endpointFlags (nil for the default
+// daemon) are inserted right after the binary. See the package
+// documentation for the documented entrypoint/healthcheck limitations.
+func runArgs(spec *config.StandaloneSpec, endpointFlags []string) (argv []string, env []string) {
+	argv = []string{"docker"}
+	argv = append(argv, endpointFlags...)
+	argv = append(argv, "run", "-d", "--name", spec.Name)
 	if spec.Restart != "" && spec.Restart != "no" {
 		argv = append(argv, "--restart", spec.Restart)
 	}

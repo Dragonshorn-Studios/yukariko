@@ -27,12 +27,13 @@ const CurrentSchemaVersion = 1
 // omitempty so learn (#7) can render a round-trippable document: values a
 // user omitted are not re-emitted as zeros (which validation rejects).
 type Config struct {
-	SchemaVersion int       `yaml:"schema_version"`
-	Server        Server    `yaml:"server,omitempty"`
-	Reporting     Reporting `yaml:"reporting,omitempty"`
-	Retention     Retention `yaml:"retention,omitempty"`
-	Limits        Limits    `yaml:"limits,omitempty"`
-	Apps          []App     `yaml:"apps,omitempty"`
+	SchemaVersion int             `yaml:"schema_version"`
+	Server        Server          `yaml:"server,omitempty"`
+	Reporting     Reporting       `yaml:"reporting,omitempty"`
+	Retention     Retention       `yaml:"retention,omitempty"`
+	Limits        Limits          `yaml:"limits,omitempty"`
+	Docker        *DockerEndpoint `yaml:"docker,omitempty"`
+	Apps          []App           `yaml:"apps,omitempty"`
 }
 
 // Server configures the read-only HTTP API and dashboard (issue #15/#16).

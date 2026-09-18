@@ -80,7 +80,7 @@ Installation, systemd hardening, upgrades, SQLite backup, private Git/registry a
 
 ## Configuration
 
-Yukariko's declarative YAML contract is defined and validated by `internal/config`: strict unknown-field rejection, path-aware validation errors, documented defaults, and secret **references only** (env/file indirection; literal secrets are not representable). See [`docs/config.md`](docs/config.md) for the full schema reference and [`examples/yukariko.yaml`](examples/yukariko.yaml) for a safe starting point.
+Yukariko's declarative YAML contract is defined and validated by `internal/config`: strict unknown-field rejection, path-aware validation errors, documented defaults, and secret **references only** (env/file indirection; literal secrets are not representable). See [`docs/config.md`](docs/config.md) for the full schema reference and [`examples/yukariko.yaml`](examples/yukariko.yaml) for a safe starting point. Rootless Docker and other local daemons are addressed per app via the `docker:` endpoint block (`docs/docker-access.md`).
 
 ## Scope
 

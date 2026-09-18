@@ -33,6 +33,56 @@ func TestListArgvReadOnly(t *testing.T) {
 	}
 }
 
+// Endpoint flags must sit between the binary and the verb; anything else
+// changes what the docker CLI parses them against.
+func TestEndpointFlagPlacement(t *testing.T) {
+	t.Parallel()
+	flags := []string{"--context", "rootless"}
+
+	list := (&CLIClient{Binary: "docker", GlobalFlags: flags}).listArgv(false)
+	want := []string{"docker", "--context", "rootless", "ps", "--format", "{{json .}}"}
+	if !equalArgv(list, want) {
+		t.Errorf("list argv = %v, want %v", list, want)
+	}
+
+	inspect := (&CLIClient{Binary: "docker", GlobalFlags: flags}).inspectArgv("abc123")
+	wantInspect := []string{"docker", "--context", "rootless", "inspect", "--type", "container", "abc123"}
+	if !equalArgv(inspect, wantInspect) {
+		t.Errorf("inspect argv = %v, want %v", inspect, wantInspect)
+	}
+	assertNoMutationVerb(t, list)
+	assertNoMutationVerb(t, inspect)
+}
+
+// WithFlags must not mutate the receiver: a shared default client spawns
+// per-endpoint copies concurrently.
+func TestWithFlagsCopies(t *testing.T) {
+	t.Parallel()
+	base := &CLIClient{Binary: "docker", Timeout: time.Second}
+	scoped := base.WithFlags([]string{"-H", "unix:///tmp/x.sock"})
+	if base.GlobalFlags != nil {
+		t.Fatal("WithFlags mutated the receiver's GlobalFlags")
+	}
+	if scoped.Timeout != time.Second || scoped.Binary != "docker" {
+		t.Fatal("WithFlags lost the base configuration")
+	}
+	if got := scoped.listArgv(false)[1]; got != "-H" {
+		t.Fatalf("scoped argv carries %q, want -H first", got)
+	}
+}
+
+func equalArgv(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestInspectArgvReadOnly(t *testing.T) {
 	t.Parallel()
 	argv := (&CLIClient{Binary: "docker"}).inspectArgv("abc123")

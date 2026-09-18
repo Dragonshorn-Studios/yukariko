@@ -75,9 +75,30 @@ type ComposePipeline struct {
 	Checkpoint VersionCheckpoint
 	// Platform resolves registry images when an image carries no platform.
 	Platform string
+	// DefaultEndpoint is the configuration-wide Docker endpoint applied to
+	// apps without their own docker block (rootless/multi-daemon hosts).
+	DefaultEndpoint *config.DockerEndpoint
 }
 
 var _ schedule.Deployer = (*ComposePipeline)(nil)
+
+// endpointFlags resolves the docker CLI global flags for one app: its
+// override, else the configuration-wide default.
+func (p *ComposePipeline) endpointFlags(app *config.App) []string {
+	if app.Docker != nil {
+		return app.Docker.Flags()
+	}
+	return p.DefaultEndpoint.Flags()
+}
+
+// endpointEnv renders the endpoint for user-owned step argv, which Yukariko
+// cannot flag-preface: DOCKER_CONTEXT/DOCKER_HOST on the runner allowlist.
+func (p *ComposePipeline) endpointEnv(app *config.App) []string {
+	if app.Docker != nil {
+		return app.Docker.Env()
+	}
+	return p.DefaultEndpoint.Env()
+}
 
 // Deploy implements schedule.Deployer for Compose apps. The caller must hold
 // the app's per-app lock; the scheduler guarantees this.
@@ -143,7 +164,7 @@ func (p *ComposePipeline) deployRegistry(ctx context.Context, app *config.App) (
 
 	// Verify each expected manifest digest actually arrived.
 	for _, img := range app.Source.Registry.Images {
-		if err := p.verifyImageDigest(ctx, img.Ref, expected[img.Ref]); err != nil {
+		if err := p.verifyImageDigest(ctx, app, img.Ref, expected[img.Ref]); err != nil {
 			return "", stages, err
 		}
 	}
@@ -227,13 +248,15 @@ func (p *ComposePipeline) expectedDigests(ctx context.Context, app *config.App) 
 // verifyImageDigest confirms the pulled image carries the expected manifest
 // digest. The match is on the digest string so repository-name
 // normalization in the local image store cannot cause false failures.
-func (p *ComposePipeline) verifyImageDigest(ctx context.Context, imageRef, expectedDigest string) error {
+func (p *ComposePipeline) verifyImageDigest(ctx context.Context, app *config.App, imageRef, expectedDigest string) error {
 	if expectedDigest == "" {
 		return fmt.Errorf("image %q: no expected digest resolved", imageRef)
 	}
+	argv := append([]string{"docker"}, p.endpointFlags(app)...)
+	argv = append(argv, "image", "inspect", imageRef, "--format", "{{json .RepoDigests}}")
 	res, err := p.exec(ctx, runner.Request{
 		Name:    "docker image inspect",
-		Argv:    []string{"docker", "image", "inspect", imageRef, "--format", "{{json .RepoDigests}}"},
+		Argv:    argv,
 		Timeout: defaultVerifyTimeout,
 	})
 	if err != nil {
@@ -247,7 +270,8 @@ func (p *ComposePipeline) verifyImageDigest(ctx context.Context, imageRef, expec
 
 // compose runs one compose verb with the exact configured context.
 func (p *ComposePipeline) compose(ctx context.Context, app *config.App, timeout time.Duration, verb ...string) error {
-	argv := append([]string{"docker"}, composeContextArgs(app)...)
+	argv := append([]string{"docker"}, p.endpointFlags(app)...)
+	argv = append(argv, composeContextArgs(app)...)
 	argv = append(argv, verb...)
 	_, err := p.exec(ctx, runner.Request{
 		Name:    "docker compose " + strings.Join(verb, " "),
@@ -290,6 +314,7 @@ func (p *ComposePipeline) runStep(ctx context.Context, app *config.App, step con
 		Dir:     dir,
 		Timeout: timeout,
 		Shell:   step.Shell,
+		Env:     p.endpointEnv(app),
 		AppID:   app.ID,
 	})
 	return err

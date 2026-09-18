@@ -49,6 +49,18 @@ type Preflight struct {
 	// DataDir is Yukariko's own state directory; probed for writability
 	// when set.
 	DataDir string
+	// DefaultEndpoint is the configuration-wide Docker endpoint applied to
+	// apps without their own docker block; reachability is probed against
+	// the app's resolved endpoint, not just the default daemon.
+	DefaultEndpoint *config.DockerEndpoint
+}
+
+// endpointFlags resolves the docker CLI global flags for one app.
+func (p *Preflight) endpointFlags(app *config.App) []string {
+	if app.Docker != nil {
+		return app.Docker.Flags()
+	}
+	return p.DefaultEndpoint.Flags()
 }
 
 // Run executes all checks for one app and returns the findings in a fixed
@@ -62,8 +74,12 @@ func (p *Preflight) Run(ctx context.Context, app *config.App) []Finding {
 	// Binaries: docker everywhere, git for git sources.
 	if _, err := p.look("docker"); err != nil {
 		add("binary:docker", "docker executable not found in PATH")
-	} else if err := p.exec(ctx, "docker", []string{"docker", "ps"}); err != nil {
-		add("docker:reachable", "cannot reach the Docker daemon: %v", err)
+	} else {
+		psArgv := append([]string{"docker"}, p.endpointFlags(app)...)
+		psArgv = append(psArgv, "ps")
+		if err := p.exec(ctx, "docker", psArgv); err != nil {
+			add("docker:reachable", "cannot reach the Docker daemon: %v", err)
+		}
 	}
 	if app.Source.Mode == config.SourceGit {
 		if _, err := p.look("git"); err != nil {
@@ -113,7 +129,9 @@ func (p *Preflight) checkCompose(ctx context.Context, app *config.App, add func(
 		add("deploy.compose", "compose mode selected but compose section is missing")
 		return
 	}
-	if err := p.exec(ctx, "docker", []string{"docker", "compose", "version"}); err != nil {
+	composeArgv := append([]string{"docker"}, p.endpointFlags(app)...)
+	composeArgv = append(composeArgv, "compose", "version")
+	if err := p.exec(ctx, "docker", composeArgv); err != nil {
 		add("binary:compose", "docker compose is not usable: %v", err)
 	}
 	if c.WorkDir == "" {

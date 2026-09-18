@@ -37,12 +37,23 @@ type FlowOptions struct {
 	// selectable list; they are excluded by default.
 	IncludeSystem bool
 	Client        docker.Client // read-only discovery
-	Git           GitProber     // optional; nil disables worktree detection
-	Stdin         io.Reader
-	Stdout        io.Writer
+	// Endpoints lists additional local daemons to scan after the default
+	// one (opts.Client is always the default daemon's client). Each entry
+	// carries its own scoped client; nil means a default-daemon-only scan.
+	// Production wiring derives it from docker.CLIClient.LocalEndpoints.
+	Endpoints []EndpointScan
+	Git       GitProber // optional; nil disables worktree detection
+	Stdin     io.Reader
+	Stdout    io.Writer
 	// Now stamps the backup file name; zero means time.Now. Injectable for
 	// deterministic tests.
 	Now time.Time
+}
+
+// EndpointScan is one additional local daemon to scan during learn.
+type EndpointScan struct {
+	Endpoint docker.Endpoint
+	Client   docker.Client
 }
 
 // FlowResult reports what one run decided. Imported lists candidate IDs
@@ -70,11 +81,10 @@ func RunFlow(ctx context.Context, opts FlowOptions) (FlowResult, error) {
 		return FlowResult{}, err
 	}
 
-	report, err := docker.Discover(ctx, opts.Client)
+	proposals, err := f.scan(ctx)
 	if err != nil {
-		return FlowResult{}, fmt.Errorf("discovery failed: %w", err)
+		return FlowResult{}, err
 	}
-	proposals := Proposals(ctx, report, opts.Git)
 
 	cleanStaleTemps(opts.ConfigPath)
 
@@ -320,6 +330,67 @@ type resolution struct {
 
 // resolve walks a candidate's confirmations and TODOs through interactive
 // prompts. ok=false means the candidate must be skipped; the reason says why.
+// scan discovers candidates on the default daemon and every additional
+// configured local endpoint (rootless and multi-daemon hosts). Candidates
+// from a non-default endpoint are stamped with its resolved host URL; IDs
+// colliding across daemons are disambiguated with the context name so the
+// merged document keeps unique app IDs.
+func (f *flow) scan(ctx context.Context) ([]*Proposal, error) {
+	scans := []EndpointScan{{Client: f.opts.Client}}
+	scans = append(scans, f.opts.Endpoints...)
+	var out []*Proposal
+	seen := map[string]bool{}
+	for i, scan := range scans {
+		report, err := docker.Discover(ctx, scan.Client)
+		if err != nil {
+			if i == 0 {
+				return nil, fmt.Errorf("discovery failed: %w", err)
+			}
+			// Additional endpoints are opportunistic: an unreachable
+			// rootless daemon must not block learning the default one.
+			fmt.Fprintf(f.opts.Stdout, "skipping docker context %q: %v\n", scan.Endpoint.Name, err)
+			continue
+		}
+		var endpoint *config.DockerEndpoint
+		if scan.Endpoint.Host != "" {
+			endpoint = &config.DockerEndpoint{Host: scan.Endpoint.Host}
+		}
+		for _, p := range Proposals(ctx, report, f.opts.Git) {
+			if endpoint != nil {
+				p.Docker = endpoint
+			}
+			if seen[p.ID] {
+				p.ID = disambiguatedID(p.ID, scan.Endpoint.Name)
+				if seen[p.ID] {
+					continue
+				}
+			}
+			seen[p.ID] = true
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+// disambiguatedID appends a slug-safe form of the context name, staying
+// within the config app-ID pattern and length.
+func disambiguatedID(id, contextName string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(contextName) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	suffix := b.String()
+	if suffix == "" {
+		suffix = "alt"
+	}
+	if len(id)+1+len(suffix) > 63 {
+		id = id[:63-1-len(suffix)]
+	}
+	return id + "-" + suffix
+}
+
 func (f *flow) resolve(ctx context.Context, p *Proposal) (app config.App, skipReason string, err error) {
 	fmt.Fprintf(f.opts.Stdout, "\n== %s (%s) ==\n", p.ID, p.Mode)
 	var res resolution
@@ -399,6 +470,9 @@ func (f *flow) resolve(ctx context.Context, p *Proposal) (app config.App, skipRe
 	if err != nil {
 		return config.App{}, err.Error(), nil
 	}
+	// The endpoint the candidate was discovered on is part of the observed
+	// reality and travels into the app (learn-owned, like source/deploy).
+	app.Docker = p.Docker
 	return app, "", nil
 }
 

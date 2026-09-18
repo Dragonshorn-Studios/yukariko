@@ -85,10 +85,25 @@ type Service struct {
 	// Docker reads container health through the read-only discovery
 	// interface.
 	Docker docker.Client
+	// DockerFor resolves the read-only client for one app; nil uses Docker.
+	// The daemon wires it so per-app Docker endpoints (rootless and
+	// multi-daemon hosts) probe the daemon the app actually deploys to.
+	DockerFor func(*config.App) docker.Client
+	// EndpointFor resolves the app's Docker endpoint for user-owned command
+	// probes (DOCKER_HOST/DOCKER_CONTEXT env); nil means none.
+	EndpointFor func(*config.App) *config.DockerEndpoint
 	// Runner executes the explicitly configured health command.
 	Runner *runner.Runner
 	// Clock stamps samples; nil → real time. Injectable for tests.
 	Clock schedule.Clock
+}
+
+// dockerFor resolves the read-only client for one app.
+func (s *Service) dockerFor(app *config.App) docker.Client {
+	if s.DockerFor != nil {
+		return s.DockerFor(app)
+	}
+	return s.Docker
 }
 
 func (s *Service) now() time.Time {
@@ -242,7 +257,7 @@ func (s *Service) probeDocker(ctx context.Context, app *config.App) Sample {
 		sample.Reason = "no single container name to inspect for this app mode"
 		return sample
 	}
-	detail, err := s.Docker.InspectContainer(ctx, app.Deploy.Standalone.Name)
+	detail, err := s.dockerFor(app).InspectContainer(ctx, app.Deploy.Standalone.Name)
 	if err != nil {
 		if errors.Is(err, docker.ErrContainerMissing) {
 			sample.State = StateUnhealthy
@@ -287,6 +302,7 @@ func (s *Service) probeCommand(ctx context.Context, app *config.App) Sample {
 		Name:    "health command",
 		Argv:    app.Health.Command,
 		Timeout: healthCommandTimeout,
+		Env:     s.endpointEnv(app),
 		AppID:   app.ID,
 	})
 	if err != nil {
@@ -302,6 +318,15 @@ func (s *Service) probeCommand(ctx context.Context, app *config.App) Sample {
 	sample.State = StateHealthy
 	sample.Reason = "health command succeeded"
 	return sample
+}
+
+// endpointEnv renders the app's Docker endpoint for the user-owned command
+// probe argv: DOCKER_CONTEXT/DOCKER_HOST on the runner allowlist.
+func (s *Service) endpointEnv(app *config.App) []string {
+	if s.EndpointFor != nil {
+		return s.EndpointFor(app).Env()
+	}
+	return nil
 }
 
 // displayURL strips query and fragment: probe URLs may carry secrets.

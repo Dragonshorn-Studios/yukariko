@@ -551,3 +551,34 @@ func TestMonitorUnhealthyNeverTriggersMutations(t *testing.T) {
 		t.Errorf("transitions = %d, want none: an always-unhealthy app never transitions", len(transitions))
 	}
 }
+
+// Per-app endpoints must route the docker probe at the daemon the app
+// deploys to, not the shared default client.
+func TestDockerForSelectsClientPerApp(t *testing.T) {
+	t.Parallel()
+	defaultClient := &fakeDocker{}
+	rootlessClient := &fakeDocker{details: map[string]docker.ContainerDetail{
+		"kuma": {Health: docker.HealthState{Configured: true, Status: "healthy"}},
+	}}
+	svc := &Service{
+		Docker: defaultClient,
+		DockerFor: func(app *config.App) docker.Client {
+			if app.Docker != nil {
+				return rootlessClient
+			}
+			return defaultClient
+		},
+		EndpointFor: func(app *config.App) *config.DockerEndpoint { return app.Docker },
+	}
+	rootless := standaloneHealthApp()
+	rootless.Docker = &config.DockerEndpoint{Host: "unix:///run/user/1000/docker.sock"}
+
+	svc.probeAll(context.Background(), rootless)
+	calls := rootlessClient.recordedCalls()
+	if len(calls) == 0 || calls[0] != "InspectContainer app-1" {
+		t.Fatalf("rootless client calls = %v", calls)
+	}
+	if len(defaultClient.recordedCalls()) != 0 {
+		t.Fatal("default client must not be touched for an endpoint app")
+	}
+}

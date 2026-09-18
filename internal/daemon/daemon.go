@@ -106,9 +106,12 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	}, time.Now())
 
 	runnerSvc := &runner.Runner{Sink: &commandRunSink{store: st}}
+	cfg := opts.Config
+	var dockerCLI *docker.CLIClient
 	dockerClient := opts.Docker
 	if dockerClient == nil {
-		dockerClient = &docker.CLIClient{Runner: runnerSvc}
+		dockerCLI = &docker.CLIClient{Runner: runnerSvc}
+		dockerClient = dockerCLI
 	}
 	gitClient := opts.Git
 	if gitClient == nil {
@@ -120,7 +123,19 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	}
 	healthSvc := opts.Health
 	if healthSvc == nil {
-		healthSvc = &health.Service{Docker: dockerClient, Runner: runnerSvc}
+		healthSvc = &health.Service{
+			Docker: dockerClient,
+			Runner: runnerSvc,
+			// Docker probes hit the daemon the app actually deploys to;
+			// with an injected test client there is no endpoint layer.
+			DockerFor: func(app *config.App) docker.Client {
+				if dockerCLI == nil {
+					return dockerClient
+				}
+				return dockerCLI.WithFlags(cfg.EndpointFor(app).Flags())
+			},
+			EndpointFor: cfg.EndpointFor,
+		}
 	}
 
 	reporter := reporterFor(opts.Config, st, runnerSvc)
@@ -134,6 +149,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Registry:    registryClient,
 		Health:      healthSvc,
 		Platform:    opts.Platform,
+		Default:     cfg.Docker,
 		pipelineRun: opts.PipelineRun,
 	}
 
@@ -143,7 +159,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	}
 	preflight := opts.Preflight
 	if preflight == nil {
-		preflight = &schedule.Preflight{DataDir: opts.DataDir}
+		preflight = &schedule.Preflight{DataDir: opts.DataDir, DefaultEndpoint: cfg.Docker}
 	}
 	schedOpts := schedule.Options{
 		Apps:      apps,
@@ -313,7 +329,17 @@ type DeployDispatcher struct {
 	Registry    *registry.Resolver
 	Health      *health.Service
 	Platform    string
+	Default     *config.DockerEndpoint // configuration-wide Docker endpoint
 	pipelineRun func(ctx context.Context, req runner.Request) (runner.Result, error)
+}
+
+// endpointFlags resolves the docker CLI global flags for one app: its
+// override, else the configuration-wide default.
+func (d *DeployDispatcher) endpointFlags(app *config.App) []string {
+	if app.Docker != nil {
+		return app.Docker.Flags()
+	}
+	return d.Default.Flags()
 }
 
 // Deploy implements the scheduler's Deployer seam.
@@ -334,26 +360,28 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 	switch app.Deploy.Mode {
 	case config.DeployCompose:
 		dep = &deploy.ComposePipeline{
-			Runner:     d.runner,
-			Run:        d.pipelineRun,
-			Git:        d.git,
-			Health:     d.Health,
-			Registry:   d.Registry,
-			Checkpoint: checkpoint,
-			Platform:   d.Platform,
+			Runner:          d.runner,
+			Run:             d.pipelineRun,
+			Git:             d.git,
+			Health:          d.Health,
+			Registry:        d.Registry,
+			Checkpoint:      checkpoint,
+			Platform:        d.Platform,
+			DefaultEndpoint: d.Default,
 		}
 	case config.DeployStandalone:
 		engine := d.Engine
 		if engine == nil {
-			engine = &deploy.CLIEngine{Docker: d.dockerClient(), Runner: d.runner}
+			engine = &deploy.CLIEngine{Docker: d.docker, Runner: d.runner, GlobalFlags: d.endpointFlags(app)}
 		}
 		dep = &deploy.StandalonePipeline{
-			Engine:     engine,
-			Registry:   d.Registry,
-			Health:     d.Health,
-			Checkpoint: checkpoint,
-			Runner:     d.runner,
-			Run:        d.pipelineRun,
+			Engine:          engine,
+			Registry:        d.Registry,
+			Health:          d.Health,
+			Checkpoint:      checkpoint,
+			Runner:          d.runner,
+			Run:             d.pipelineRun,
+			DefaultEndpoint: d.Default,
 		}
 	default:
 		err := fmt.Errorf("unsupported deploy mode %q", app.Deploy.Mode)
@@ -371,13 +399,6 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 	// Success: the pipeline's checkpoint already committed the deployment
 	// transaction; nothing further mutates the deployed version here.
 	return res, nil
-}
-
-func (d *DeployDispatcher) dockerClient() docker.Client {
-	if d.docker != nil {
-		return d.docker
-	}
-	return &docker.CLIClient{Runner: d.runner}
 }
 
 // boundCheckpoint is the per-run VersionCheckpoint bound to one open
