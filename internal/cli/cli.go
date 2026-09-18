@@ -73,8 +73,8 @@ and runs controlled local commands; it does not replace Compose, Coolify, or Por
 	root.SetVersionTemplate("{{.Name}} {{.Version}}\n")
 	root.CompletionOptions.DisableDefaultCmd = true
 
-	root.PersistentFlags().StringVar(&a.opts.Config, "config", "", "path to YAML configuration file")
-	root.PersistentFlags().StringVar(&a.opts.DataDir, "data-dir", "", "path to Yukariko data directory")
+	root.PersistentFlags().StringVar(&a.opts.Config, "config", "", "path to YAML configuration (default /etc/yukariko/yukariko.yaml when run as root on Linux)")
+	root.PersistentFlags().StringVar(&a.opts.DataDir, "data-dir", "", "path to Yukariko data directory (default /var/lib/yukariko as root on Linux, else ./data)")
 
 	root.AddCommand(a.newRunCommand())
 	root.AddCommand(a.newCheckCommand())

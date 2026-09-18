@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -30,8 +29,9 @@ learn never deploys, restarts, or changes Docker state.
 --dry-run previews the merged configuration without writing.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if a.opts.Config == "" {
-				return fmt.Errorf("--config is required for learn: %w", errUsage)
+			configPath, err := a.configPathFor()
+			if err != nil {
+				return err
 			}
 			runner := &runner.Runner{}
 			client := a.dockerClient
@@ -46,8 +46,8 @@ learn never deploys, restarts, or changes Docker state.
 			if stdin == nil {
 				stdin = os.Stdin
 			}
-			_, err := learn.RunFlow(cmd.Context(), learn.FlowOptions{
-				ConfigPath:    a.opts.Config,
+			_, err = learn.RunFlow(cmd.Context(), learn.FlowOptions{
+				ConfigPath:    configPath,
 				DryRun:        dryRun,
 				JSONOut:       jsonOut,
 				IncludeSystem: includeSystem,
