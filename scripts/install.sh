@@ -268,9 +268,10 @@ if [ "$(id -u)" -eq 0 ] && [ -d /run/systemd/system ]; then
     done
     echo "  to manage the daemon's apps with Yukariko:"
     echo "    sudo yukariko expose /run/user/<uid>/docker.sock"
-    echo "    and let the daemon reach it (systemctl edit yukariko):"
-    echo "      [Service]"
-    echo "      Environment=DOCKER_HOST=unix:///run/user/<uid>/docker.sock"
+    echo "    then point the config at it (${SYS_CONF}):"
+    echo "      docker: {host: unix:///run/user/<uid>/docker.sock}"
+    echo "    (or just run: sudo yukariko learn - apps found on that"
+    echo "     daemon get the endpoint stamped automatically)"
   fi
 fi
 
