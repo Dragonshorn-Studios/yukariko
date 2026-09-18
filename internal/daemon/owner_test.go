@@ -21,6 +21,32 @@ func TestDirOwner(t *testing.T) {
 	}
 }
 
+// A planted symlink must never be chowned through: the heal runs as root
+// over a service-user-owned directory, and following the link would change
+// ownership of an arbitrary root-owned file.
+func TestHealStoreFilesSkipsSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.WriteFile(target, []byte("root-owned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, store.DBFileName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, store.DBFileName+"-wal"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var chowned []string
+	healStoreFiles(dir, 0, 999, 999, func(path string, uid, gid int) error {
+		chowned = append(chowned, filepath.Base(path))
+		return nil
+	})
+	if len(chowned) != 1 || chowned[0] != store.DBFileName+"-wal" {
+		t.Fatalf("chowns = %v, want only the regular %s file", chowned, store.DBFileName+"-wal")
+	}
+}
+
 func TestHealStoreFiles(t *testing.T) {
 	writeDB := func(t *testing.T, names ...string) string {
 		t.Helper()

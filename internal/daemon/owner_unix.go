@@ -26,6 +26,8 @@ func dirOwner(path string) (uid, gid int) {
 // healStoreFiles hands the directory's database files (and WAL sidecars) to
 // the directory owner when invoked as root. The seams exist so tests can
 // verify the decision without privileges; chown failures are best effort.
+// Symlinks are never followed: the directory is owned by the service user,
+// and a planted yukariko.db -> /etc/passwd must not hand it root-owned files.
 func healStoreFiles(dataDir string, euid, dirUID, dirGID int, chown func(path string, uid, gid int) error) {
 	if euid != 0 || dirUID <= 0 || dirGID < 0 {
 		return // not root, or nothing (root-owned/unknown) to heal toward
@@ -35,6 +37,10 @@ func healStoreFiles(dataDir string, euid, dirUID, dirGID int, chown func(path st
 		return
 	}
 	for _, m := range matches {
+		fi, err := os.Lstat(m)
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
 		_ = chown(m, dirUID, dirGID)
 	}
 }
