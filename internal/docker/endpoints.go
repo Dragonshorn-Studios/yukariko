@@ -4,39 +4,72 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
 // Endpoint is one local Docker daemon addressable by the CLI. The implicit
-// default daemon (Name and Host empty) carries no flags; every other entry
-// selects its daemon by context name.
+// default daemon (Name and Host empty) carries no flags; context-derived
+// entries select their daemon by --context name, socket-derived entries by
+// -H host URL.
 type Endpoint struct {
-	// Name is the Docker context name; empty for the implicit default.
+	// Name labels the endpoint in scan output and ID disambiguation: the
+	// Docker context name, "rootless-<uid>", or "" for the implicit default.
 	Name string
 	// Host is the daemon's endpoint URL (e.g.
 	// unix:///run/user/1000/docker.sock); empty for the implicit default.
 	Host string
+	// Flags are the docker CLI global flags selecting this endpoint; nil
+	// for the implicit default.
+	Flags []string
 }
 
-// Flags returns the docker CLI global flags selecting this endpoint, or nil
-// for the implicit default.
-func (e Endpoint) Flags() []string {
-	if e.Name == "" {
-		return nil
-	}
-	return []string{"--context", e.Name}
-}
-
-// LocalEndpoints lists every local Docker daemon addressable from this
-// machine: the invoking user's default daemon first, then one entry per
-// additional local Docker context, deduplicated by host URL. Remote
+// LocalEndpoints lists every local Docker daemon reachable through the
+// invoking user's Docker contexts: the default daemon first, then one
+// entry per additional local context, deduplicated by host URL. Remote
 // endpoints (ssh://, tcp://) are excluded — Yukariko is a local agent.
+//
+// Contexts are per-user (~/.docker/contexts): a rootless daemon usually has
+// NO context entry for the invoking root or service user. Pair with
+// RootlessSockets, which finds such daemons by their sockets instead.
 func (c *CLIClient) LocalEndpoints(ctx context.Context) ([]Endpoint, error) {
 	res, err := c.run(ctx, "docker context ls", append([]string{c.binary(), "context", "ls"}, "--format", "{{json .}}"))
 	if err != nil {
 		return nil, err
 	}
 	return parseContexts(res.Stdout), nil
+}
+
+// RootlessSockets lists rootless Docker daemon sockets under /run/user,
+// addressed directly by host URL — no Docker context required. This is the
+// same ground truth the installer's rootless hint uses.
+func RootlessSockets() []Endpoint {
+	return socketsUnder("/run/user")
+}
+
+// socketsUnder lists <dir>/<uid>/docker.sock entries that are actual
+// sockets. Best effort: unreadable or non-socket entries are skipped.
+func socketsUnder(runUserDir string) []Endpoint {
+	matches, err := filepath.Glob(filepath.Join(runUserDir, "*", "docker.sock"))
+	if err != nil {
+		return nil
+	}
+	var out []Endpoint
+	for _, sock := range matches {
+		fi, err := os.Stat(sock)
+		if err != nil || fi.Mode()&os.ModeSocket == 0 {
+			continue
+		}
+		uid := filepath.Base(filepath.Dir(sock))
+		host := "unix://" + sock
+		out = append(out, Endpoint{
+			Name:  "rootless-" + uid,
+			Host:  host,
+			Flags: []string{"-H", host},
+		})
+	}
+	return out
 }
 
 // parseContexts extracts local, distinct endpoints from `docker context ls
@@ -83,7 +116,11 @@ func parseContexts(stdout []byte) []Endpoint {
 			continue
 		}
 		seen[row.Endpoints.Docker.Host] = true
-		out = append(out, Endpoint{Name: row.Name, Host: row.Endpoints.Docker.Host})
+		out = append(out, Endpoint{
+			Name:  row.Name,
+			Host:  row.Endpoints.Docker.Host,
+			Flags: []string{"--context", row.Name},
+		})
 	}
 	return out
 }

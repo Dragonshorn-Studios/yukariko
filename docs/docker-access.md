@@ -69,12 +69,14 @@ the system daemon; on a rootless-only host, remove that requirement with a
 drop-in containing `[Unit]` and an empty `Requires=` line (an empty
 assignment resets the list).
 
-`learn` scans the default daemon plus every additional **local** Docker
-context (remote `ssh://`/`tcp://` endpoints are skipped — Yukariko is a
-local agent) and records non-default candidates with the daemon's resolved
-socket URL rather than a context name, because context definitions live in
-the invoking user's `~/.docker/contexts` and the service user may not
-share them.
+`learn` scans the default daemon plus every additional local daemon:
+Docker contexts and rootless sockets under `/run/user/<uid>/docker.sock`
+(remote `ssh://`/`tcp://` endpoints are skipped — Yukariko is a local
+agent). The context source matters less than it seems: contexts live in
+the invoking user's `~/.docker/contexts`, so a rootless daemon usually has
+none for the invoking root or service user — its socket is the ground
+truth. Non-default candidates are recorded with the daemon's resolved
+socket URL rather than a context name.
 
 ## What Yukariko itself does with the access
 

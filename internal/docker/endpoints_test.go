@@ -1,6 +1,10 @@
 package docker
 
 import (
+	"net"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -22,7 +26,7 @@ func TestParseContexts(t *testing.T) {
 				`{"Name":"rootless","Endpoints":{"docker":{"Host":"unix:///run/user/1000/docker.sock"}}}` + "\n",
 			want: []Endpoint{
 				{},
-				{Name: "rootless", Host: "unix:///run/user/1000/docker.sock"},
+				{Name: "rootless", Host: "unix:///run/user/1000/docker.sock", Flags: []string{"--context", "rootless"}},
 			},
 		},
 		{
@@ -43,7 +47,7 @@ func TestParseContexts(t *testing.T) {
 				`{"Name":"rootless","Endpoints":{"docker":{"Host":"unix:///run/user/1000/docker.sock"}}}` + "\n",
 			want: []Endpoint{
 				{},
-				{Name: "rootless", Host: "unix:///run/user/1000/docker.sock"},
+				{Name: "rootless", Host: "unix:///run/user/1000/docker.sock", Flags: []string{"--context", "rootless"}},
 			},
 		},
 	}
@@ -51,25 +55,52 @@ func TestParseContexts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := parseContexts([]byte(tc.stdout))
-			if len(got) != len(tc.want) {
+			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("endpoints = %+v, want %+v", got, tc.want)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Fatalf("endpoints[%d] = %+v, want %+v", i, got[i], tc.want[i])
-				}
 			}
 		})
 	}
 }
 
-func TestEndpointFlags(t *testing.T) {
+// Rootless daemons need no Docker context: their sockets under /run/user
+// are the ground truth, addressed directly by -H (the invoking root or
+// service user usually has no context entry for them).
+func TestSocketsUnder(t *testing.T) {
 	t.Parallel()
-	if flags := (Endpoint{}).Flags(); flags != nil {
-		t.Errorf("default endpoint flags = %v, want nil", flags)
+	dir := t.TempDir()
+	for _, uid := range []string{"1000", "1001"} {
+		if err := os.MkdirAll(filepath.Join(dir, uid), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	flags := Endpoint{Name: "rootless"}.Flags()
-	if len(flags) != 2 || flags[0] != "--context" || flags[1] != "rootless" {
-		t.Errorf("context flags = %v", flags)
+	l1, err := net.Listen("unix", filepath.Join(dir, "1000", "docker.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l1.Close() })
+	l2, err := net.Listen("unix", filepath.Join(dir, "1001", "docker.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l2.Close() })
+	// A plain file named docker.sock must be ignored.
+	if err := os.MkdirAll(filepath.Join(dir, "1002"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "1002", "docker.sock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := socketsUnder(dir)
+	want := []Endpoint{
+		{Name: "rootless-1000", Host: "unix://" + filepath.Join(dir, "1000", "docker.sock"), Flags: []string{"-H", "unix://" + filepath.Join(dir, "1000", "docker.sock")}},
+		{Name: "rootless-1001", Host: "unix://" + filepath.Join(dir, "1001", "docker.sock"), Flags: []string{"-H", "unix://" + filepath.Join(dir, "1001", "docker.sock")}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sockets = %+v, want %+v", got, want)
+	}
+
+	if all := socketsUnder(filepath.Join(dir, "missing")); all != nil {
+		t.Fatalf("missing dir = %+v, want nil", all)
 	}
 }

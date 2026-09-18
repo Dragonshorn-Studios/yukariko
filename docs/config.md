@@ -96,7 +96,7 @@ docker:
 ```
 
 - Yukariko stays CLI-only: the endpoint becomes `docker --context …` / `docker -H …` argv on every discovery, deploy, preflight, and health invocation. User-owned argv (compose `steps`, health `command` probes) instead receives `DOCKER_HOST`/`DOCKER_CONTEXT` in its environment — write the flags yourself there if you prefer.
-- `learn` scans every local daemon (`docker context ls`; remote `ssh://`/`tcp://` endpoints are excluded — Yukariko is a local agent) and stamps non-default candidates with the resolved `host` URL, since context definitions are per-user and the service user may not share them. The endpoint field is learn-owned discovered reality: re-running learn refreshes it.
+- `learn` scans every local daemon — Docker contexts plus rootless sockets under `/run/user/<uid>/docker.sock`, which need no context (remote `ssh://`/`tcp://` endpoints are excluded — Yukariko is a local agent) — and stamps non-default candidates with the resolved `host` URL, since context definitions are per-user and the service user may not share them. The endpoint field is learn-owned discovered reality: re-running learn refreshes it.
 - Under systemd, `ProtectHome=yes` blocks `/run/user` entirely: see `docs/operations.md` ("Git-source apps under systemd" and rootless notes) for the required drop-in and `loginctl enable-linger`.
 
 ### `source` — where changes come from

@@ -39,21 +39,35 @@ learn never deploys, restarts, or changes Docker state.
 			if client == nil {
 				client = &docker.CLIClient{Runner: runner}
 			}
-			// Rootless/multi-daemon hosts: scan every local endpoint, not
-			// just the invoking user's default. Contexts are advisory; a
-			// CLI without context support falls back to default-only.
+			// Rootless/multi-daemon hosts: scan every local daemon, not
+			// just the invoking user's default. Two sources, deduplicated
+			// by host: Docker contexts (per-user, advisory — a CLI without
+			// context support just skips them) and rootless sockets under
+			// /run/user, which need no context at all — a rootless daemon
+			// usually has none for the invoking root or service user.
 			var endpoints []learn.EndpointScan
 			if cli, ok := client.(*docker.CLIClient); ok {
-				eps, err := cli.LocalEndpoints(cmd.Context())
-				if err != nil {
-					fmt.Fprintln(cmd.OutOrStdout(), "note: docker context listing failed ("+err.Error()+"); scanning the default daemon only")
+				seen := map[string]bool{}
+				if eps, err := cli.LocalEndpoints(cmd.Context()); err != nil {
+					fmt.Fprintln(cmd.OutOrStdout(), "note: docker context listing failed ("+err.Error()+"); scanning the default daemon and any rootless sockets")
 				} else {
 					for _, ep := range eps[1:] { // eps[0] is the implicit default
+						seen[ep.Host] = true
 						endpoints = append(endpoints, learn.EndpointScan{
 							Endpoint: ep,
-							Client:   cli.WithFlags(ep.Flags()),
+							Client:   cli.WithFlags(ep.Flags),
 						})
 					}
+				}
+				for _, ep := range docker.RootlessSockets() {
+					if seen[ep.Host] {
+						continue
+					}
+					seen[ep.Host] = true
+					endpoints = append(endpoints, learn.EndpointScan{
+						Endpoint: ep,
+						Client:   cli.WithFlags(ep.Flags),
+					})
 				}
 			}
 			git := a.gitProber
