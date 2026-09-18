@@ -110,6 +110,10 @@ func (p *RunnerGitProber) remoteName() string {
 
 // git runs one read-only git command through the runner. Failure text is
 // already redacted by the runner; it is collapsed here for one-line errors.
+// safe.directory is scoped to the probed dir so a root or service-user
+// probe of a user-owned worktree is not refused with "dubious ownership"
+// (`sudo yukariko learn` hits this constantly); it only relaxes the
+// ownership check for that one path.
 func (p *RunnerGitProber) git(ctx context.Context, dir string, args ...string) (string, error) {
 	r := p.Runner
 	if r == nil {
@@ -117,7 +121,7 @@ func (p *RunnerGitProber) git(ctx context.Context, dir string, args ...string) (
 	}
 	res, err := r.Run(ctx, runner.Request{
 		Name:    "git " + args[0],
-		Argv:    append([]string{"git", "-C", dir}, args...),
+		Argv:    append([]string{"git", "-c", "safe.directory=" + dir, "-C", dir}, args...),
 		Timeout: probeTimeout,
 	})
 	if err != nil {
