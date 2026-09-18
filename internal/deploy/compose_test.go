@@ -23,6 +23,7 @@ type fakeExec struct {
 	mu      sync.Mutex
 	argvs   [][]string
 	dirs    []string
+	envs    [][]string
 	respond func(req runner.Request) runner.Result
 }
 
@@ -30,6 +31,7 @@ func (f *fakeExec) run(_ context.Context, req runner.Request) (runner.Result, er
 	f.mu.Lock()
 	f.argvs = append(f.argvs, req.Argv)
 	f.dirs = append(f.dirs, req.Dir)
+	f.envs = append(f.envs, req.Env)
 	f.mu.Unlock()
 	if f.respond != nil {
 		return f.respond(req), nil
@@ -49,6 +51,12 @@ func (f *fakeExec) all() [][]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([][]string(nil), f.argvs...)
+}
+
+func (f *fakeExec) allEnvs() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]string(nil), f.envs...)
 }
 
 func (f *fakeExec) joined() string {
@@ -396,3 +404,78 @@ var (
 	_ DigestResolver    = (*fakeResolver)(nil)
 	_ VersionCheckpoint = (*countingCheckpoint)(nil)
 )
+
+// Every docker invocation a compose deploy makes — pull, the image-inspect
+// digest verify, and the compose verbs — must address the app's resolved
+// endpoint; user-owned step argv instead gets the endpoint as env.
+func TestComposeEndpointFlagsAndStepEnv(t *testing.T) {
+	t.Parallel()
+	exec := &fakeExec{}
+	ck := &countingCheckpoint{}
+	p := newComposePipeline(exec, ck)
+	p.DefaultEndpoint = &config.DockerEndpoint{Host: "unix:///run/user/1000/docker.sock"}
+
+	app := composeApp()
+	// Steps belong to the git path (#11): switch the app so the step env
+	// assertion exercises a real flow.
+	app.Source = config.Source{Mode: config.SourceGit, Git: &config.GitSource{Dir: "/srv/web", Branch: "main"}}
+	app.Steps.Pre = []config.Step{{Name: "notify", Command: []string{"make", "notify"}}}
+	res, err := p.Deploy(context.Background(), app)
+	if err != nil || !res.Success {
+		t.Fatalf("deploy = %v / %v (detail %q)", err, res.Success, res.Detail)
+	}
+
+	dockerPrefix := "docker -H unix:///run/user/1000/docker.sock"
+	for _, argv := range exec.all() {
+		joined := strings.Join(argv, " ")
+		switch {
+		case strings.Contains(joined, "image inspect"):
+			if !strings.HasPrefix(joined, dockerPrefix+" image inspect") {
+				t.Errorf("image inspect without endpoint: %s", joined)
+			}
+		case strings.Contains(joined, "compose"):
+			if !strings.HasPrefix(joined, dockerPrefix+" compose") {
+				t.Errorf("compose verb without endpoint: %s", joined)
+			}
+		case strings.HasPrefix(joined, "make"):
+			// user step: argv untouched
+		default:
+			t.Errorf("unexpected argv: %s", joined)
+		}
+	}
+
+	// The user step's argv is untouched and its env carries the endpoint.
+	var stepEnv []string
+	for i, argv := range exec.all() {
+		if len(argv) > 0 && argv[0] == "make" {
+			stepEnv = exec.allEnvs()[i]
+		}
+	}
+	if stepEnv == nil {
+		t.Fatal("pre step never ran")
+	}
+	if len(stepEnv) != 1 || stepEnv[0] != "DOCKER_HOST=unix:///run/user/1000/docker.sock" {
+		t.Fatalf("step env = %v, want DOCKER_HOST", stepEnv)
+	}
+}
+
+// A per-app endpoint overrides the configuration-wide default.
+func TestComposeAppEndpointOverridesDefault(t *testing.T) {
+	t.Parallel()
+	exec := &fakeExec{}
+	ck := &countingCheckpoint{}
+	p := newComposePipeline(exec, ck)
+	p.DefaultEndpoint = &config.DockerEndpoint{Context: "wrong-one"}
+
+	app := composeApp()
+	app.Docker = &config.DockerEndpoint{Context: "rootless"}
+	if _, err := p.Deploy(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	for _, argv := range exec.all() {
+		joined := strings.Join(argv, " ")
+		if strings.HasPrefix(joined, "docker ") && !strings.HasPrefix(joined, "docker --context rootless") {
+			t.Errorf("argv not using the app override: %s", joined)
+		}
+	}
+}

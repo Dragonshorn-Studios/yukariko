@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -38,6 +39,23 @@ learn never deploys, restarts, or changes Docker state.
 			if client == nil {
 				client = &docker.CLIClient{Runner: runner}
 			}
+			// Rootless/multi-daemon hosts: scan every local endpoint, not
+			// just the invoking user's default. Contexts are advisory; a
+			// CLI without context support falls back to default-only.
+			var endpoints []learn.EndpointScan
+			if cli, ok := client.(*docker.CLIClient); ok {
+				eps, err := cli.LocalEndpoints(cmd.Context())
+				if err != nil {
+					fmt.Fprintln(cmd.OutOrStdout(), "note: docker context listing failed ("+err.Error()+"); scanning the default daemon only")
+				} else {
+					for _, ep := range eps[1:] { // eps[0] is the implicit default
+						endpoints = append(endpoints, learn.EndpointScan{
+							Endpoint: ep,
+							Client:   cli.WithFlags(ep.Flags()),
+						})
+					}
+				}
+			}
 			git := a.gitProber
 			if git == nil {
 				git = &learn.RunnerGitProber{Runner: runner}
@@ -52,6 +70,7 @@ learn never deploys, restarts, or changes Docker state.
 				JSONOut:       jsonOut,
 				IncludeSystem: includeSystem,
 				Client:        client,
+				Endpoints:     endpoints,
 				Git:           git,
 				Stdin:         stdin,
 				Stdout:        cmd.OutOrStdout(),

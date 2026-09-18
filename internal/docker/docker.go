@@ -113,6 +113,10 @@ type Client interface {
 type CLIClient struct {
 	// Binary is the Docker CLI executable; empty means "docker" from PATH.
 	Binary string
+	// GlobalFlags are docker CLI global flags inserted right after the
+	// binary, before the verb — the endpoint selector (["--context", name]
+	// or ["-H", "unix://..."]) for non-default daemons such as rootless.
+	GlobalFlags []string
 	// Runner executes the commands. Per the package secret-hygiene rule its
 	// Sink must stay nil for discovery: command output can contain secret
 	// values and is never persisted.
@@ -124,6 +128,15 @@ type CLIClient struct {
 var _ Client = (*CLIClient)(nil)
 
 const defaultTimeout = 30 * time.Second
+
+// WithFlags returns a copy of the client whose invocations carry additional
+// docker global flags (an endpoint selector). The original is unchanged, so
+// a shared default client can spawn per-endpoint copies safely.
+func (c *CLIClient) WithFlags(flags []string) *CLIClient {
+	cp := *c
+	cp.GlobalFlags = flags
+	return &cp
+}
 
 func (c *CLIClient) binary() string {
 	if c.Binary != "" {
@@ -148,7 +161,8 @@ func (c *CLIClient) runner() *runner.Runner {
 
 // listArgv builds the read-only argv for the container inventory.
 func (c *CLIClient) listArgv(all bool) []string {
-	argv := []string{c.binary(), "ps"}
+	argv := append([]string{c.binary()}, c.GlobalFlags...)
+	argv = append(argv, "ps")
 	if all {
 		argv = append(argv, "-a")
 	}
@@ -159,7 +173,8 @@ func (c *CLIClient) listArgv(all bool) []string {
 // --type pins resolution to containers so a name collision with an image
 // cannot return the wrong object.
 func (c *CLIClient) inspectArgv(idOrName string) []string {
-	return []string{c.binary(), "inspect", "--type", "container", idOrName}
+	argv := append([]string{c.binary()}, c.GlobalFlags...)
+	return append(argv, "inspect", "--type", "container", idOrName)
 }
 
 // ListContainers implements Client via `docker ps --format {{json .}}`.

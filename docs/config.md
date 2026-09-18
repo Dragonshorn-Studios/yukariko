@@ -71,6 +71,7 @@ may be given instead — never both.
 | `retention.health_days` | int | `14` | Health sample retention (days) |
 | `retention.deployments_days` | int | `365` | Deployment history retention (days) |
 | `limits.command_output_bytes` | int | `65536` | Bounded captured command output per stream |
+| `docker` | table | unset | Machine-wide Docker endpoint: exactly one of `docker.context` or `docker.host` (issue #42); per-app `docker` overrides it |
 
 ## Applications (`apps`)
 
@@ -82,6 +83,21 @@ may be given instead — never both.
 | `interval` | duration | `5m` | How often the source is checked for changes |
 | `timeout` | duration | `10m` | Overall budget for one update attempt |
 | `retry.base` / `retry.max` | duration | `30s` / `30m` | Bounded exponential backoff after transient failures |
+| `docker` | table | inherit | Per-app Docker endpoint override; same shape as the top-level `docker` block |
+
+### `docker` — which daemon an app talks to
+
+Rootless Docker and other local daemons are selected per app (or machine-wide) with exactly one of `context` or `host`:
+
+```yaml
+docker:
+  host: unix:///run/user/1000/docker.sock   # rootless daemon of uid 1000
+  # context: rootless                       # or a named docker context
+```
+
+- Yukariko stays CLI-only: the endpoint becomes `docker --context …` / `docker -H …` argv on every discovery, deploy, preflight, and health invocation. User-owned argv (compose `steps`, health `command` probes) instead receives `DOCKER_HOST`/`DOCKER_CONTEXT` in its environment — write the flags yourself there if you prefer.
+- `learn` scans every local daemon (`docker context ls`; remote `ssh://`/`tcp://` endpoints are excluded — Yukariko is a local agent) and stamps non-default candidates with the resolved `host` URL, since context definitions are per-user and the service user may not share them. The endpoint field is learn-owned discovered reality: re-running learn refreshes it.
+- Under systemd, `ProtectHome=yes` blocks `/run/user` entirely: see `docs/operations.md` ("Git-source apps under systemd" and rootless notes) for the required drop-in and `loginctl enable-linger`.
 
 ### `source` — where changes come from
 
@@ -241,5 +257,7 @@ missing `schema_version`, invalid durations, missing mode-specific blocks,
 relative work dirs/paths, duplicate app IDs, duplicate step names within a
 list, two apps sharing a deploy target, invalid image refs/ports/binds,
 bad probe status ranges, literal secrets (they are not representable),
-and reporting configuration that enables itself without the required
-identity and key references.
+reporting configuration that enables itself without the required identity
+and key references, and Docker endpoints setting both `context` and `host`
+or carrying a host without a `unix://`, `tcp://`, `ssh://`, or `npipe://`
+scheme.

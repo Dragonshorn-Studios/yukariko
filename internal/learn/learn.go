@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/Dragonshorn-Studios/yukariko/internal/config"
 	"github.com/Dragonshorn-Studios/yukariko/internal/docker"
 )
 
@@ -118,6 +119,12 @@ type Proposal struct {
 
 	Compose    *ComposeProposal    `json:"compose,omitempty"`    // non-nil iff Mode is compose
 	Standalone *StandaloneProposal `json:"standalone,omitempty"` // non-nil iff Mode is standalone
+
+	// Docker is the endpoint the candidate was discovered on (nil = the
+	// invoking user's default daemon). Non-default candidates carry the
+	// resolved host URL, not a context name: contexts live in the invoking
+	// user's ~/.docker/contexts and the service user may not share them.
+	Docker *config.DockerEndpoint `json:"docker,omitempty"`
 }
 
 // candidate pairs a proposal with the inputs of unique-ID assignment.

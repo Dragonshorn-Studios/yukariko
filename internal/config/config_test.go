@@ -144,6 +144,38 @@ func TestParseValidExamples(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "docker endpoints",
+			file: "docker-endpoint.yaml",
+			check: func(t *testing.T, cfg *Config) {
+				if cfg.Docker == nil || cfg.Docker.Host != "unix:///run/user/1000/docker.sock" {
+					t.Fatalf("global endpoint = %+v", cfg.Docker)
+				}
+				inherits, ok := cfg.App("inherits-global")
+				if !ok {
+					t.Fatal("inherits-global missing")
+				}
+				if got := cfg.EndpointFor(&inherits); got != cfg.Docker {
+					t.Fatalf("EndpointFor(inherits) = %+v, want the global default", got)
+				}
+				named, ok := cfg.App("named-context")
+				if !ok {
+					t.Fatal("named-context missing")
+				}
+				if got := cfg.EndpointFor(&named); got == nil || got.Context != "rootless" {
+					t.Fatalf("EndpointFor(named) = %+v, want the per-app context override", got)
+				}
+				if flags := named.Docker.Flags(); len(flags) != 2 || flags[0] != "--context" || flags[1] != "rootless" {
+					t.Fatalf("context flags = %v", flags)
+				}
+				if env := cfg.Docker.Env(); len(env) != 1 || env[0] != "DOCKER_HOST=unix:///run/user/1000/docker.sock" {
+					t.Fatalf("host env = %v", env)
+				}
+				if flags := (*DockerEndpoint)(nil).Flags(); flags != nil {
+					t.Fatalf("nil endpoint flags = %v, want nil", flags)
+				}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -191,6 +223,43 @@ func TestParseInvalid(t *testing.T) {
 		// error instead of a collected *InvalidError.
 		plain bool
 	}{
+		{
+			name: "global endpoint sets both context and host",
+			doc: `
+schema_version: 1
+docker:
+  context: rootless
+  host: unix:///run/user/1000/docker.sock
+apps: []
+`,
+			want: []string{"docker: must set exactly one of context or host, both are set"},
+		},
+		{
+			name: "global endpoint host with bad scheme",
+			doc: `
+schema_version: 1
+docker:
+  host: /run/user/1000/docker.sock
+apps: []
+`,
+			want: []string{`docker.host: must be a unix://, tcp://, ssh://, or npipe:// endpoint URL, got "/run/user/1000/docker.sock"`},
+		},
+		{
+			name: "app endpoint sets both context and host",
+			doc: `
+schema_version: 1
+apps:
+  - id: demo
+    docker: {context: a, host: unix:///tmp/x.sock}
+    source:
+      mode: registry
+      registry: {images: [{ref: nginx:1}]}
+    deploy:
+      mode: standalone
+      standalone: {image: nginx:1, name: demo}
+`,
+			want: []string{"apps[0].docker: must set exactly one of context or host, both are set"},
+		},
 		{
 			name: "missing git branch",
 			doc: `

@@ -292,3 +292,37 @@ func TestPreflightSecretValuesNeverInFindings(t *testing.T) {
 		}
 	}
 }
+
+// The docker probes must address the app's resolved endpoint: a rootless
+// app must not be gated on the system daemon's reachability.
+func TestPreflightProbesAppEndpoint(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app := &config.App{
+		ID:     "web",
+		Source: config.Source{Mode: config.SourceRegistry, Registry: &config.RegistrySource{Images: []config.ImageRef{{Ref: "nginx:1"}}}},
+		Deploy: config.Deploy{Mode: config.DeployCompose, Compose: &config.ComposeDeploy{WorkDir: dir, Files: []string{filepath.Join(dir, "compose.yaml")}}},
+		Docker: &config.DockerEndpoint{Host: "unix:///run/user/1000/docker.sock"},
+	}
+
+	var probed []string
+	p := &Preflight{
+		LookPath: func(string) (string, error) { return "/usr/bin/docker", nil },
+		Exec: func(_ context.Context, _ string, argv []string) error {
+			probed = append(probed, strings.Join(argv, " "))
+			return nil
+		},
+		DataDir: t.TempDir(),
+	}
+	if findings := p.Run(context.Background(), app); len(findings) != 0 {
+		t.Fatalf("findings = %v", findings)
+	}
+	joined := strings.Join(probed, "\n")
+	want := "docker -H unix:///run/user/1000/docker.sock ps\ndocker -H unix:///run/user/1000/docker.sock compose version"
+	if joined != want {
+		t.Fatalf("probes =\n%s\nwant\n%s", joined, want)
+	}
+}

@@ -40,6 +40,42 @@ privilege, whether or not the binary ever asks for it.
   subset; if you use one, scope it to exactly the endpoints the deploy
   pipeline documents, and expect breakage otherwise.
 
+## Rootless daemons and multiple local daemons
+
+A rootless daemon's socket lives at `$XDG_RUNTIME_DIR/docker.sock`, i.e.
+`/run/user/<uid>/docker.sock`, and only exists while that user has a
+runtime directory — run `loginctl enable-linger <user>` so it survives
+reboots without a login session.
+
+Yukariko addresses such daemons per app (or machine-wide) through the
+`docker:` endpoint block; see [`config.md`](config.md). The endpoint is
+applied as `docker -H unix:///run/user/<uid>/docker.sock` (or
+`--context <name>`) argv on every invocation — still CLI-only, no SDK.
+
+Access reality on the socket itself, which rootless Docker creates `0600`
+and owned by its user:
+
+- Running Yukariko commands as root (`sudo yukariko …`) can reach any
+  rootless socket.
+- The systemd `yukariko` service user cannot, unless it **is** the rootless
+  user (then run the unit as that user) or you deliberately relax the
+  socket's group/permissions — a host-specific decision that widens who
+  can act as that user.
+
+Under the shipped unit, `ProtectHome=yes` makes `/run/user` inaccessible
+entirely: a rootless endpoint needs the drop-in described in
+[`operations.md`](operations.md). `Requires=docker.service` also assumes
+the system daemon; on a rootless-only host, remove that requirement with a
+drop-in containing `[Unit]` and an empty `Requires=` line (an empty
+assignment resets the list).
+
+`learn` scans the default daemon plus every additional **local** Docker
+context (remote `ssh://`/`tcp://` endpoints are skipped — Yukariko is a
+local agent) and records non-default candidates with the daemon's resolved
+socket URL rather than a context name, because context definitions live in
+the invoking user's `~/.docker/contexts` and the service user may not
+share them.
+
 ## What Yukariko itself does with the access
 
 - Discovery (`internal/docker`) issues only the read verbs `docker ps` and

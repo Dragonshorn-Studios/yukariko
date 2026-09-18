@@ -16,6 +16,20 @@ import (
 type CLIEngine struct {
 	Docker docker.Client // Inspect; nil uses a CLI client over Runner
 	Runner *runner.Runner
+	// Exec overrides command execution (tests inject a recorder). When nil,
+	// Runner.Run is used.
+	Exec func(ctx context.Context, req runner.Request) (runner.Result, error)
+	// GlobalFlags are docker CLI global flags (an endpoint selector for
+	// rootless/multi-daemon hosts) inserted after the binary on every
+	// engine verb and the discovery client.
+	GlobalFlags []string
+}
+
+func (e *CLIEngine) exec(ctx context.Context, req runner.Request) (runner.Result, error) {
+	if e.Exec != nil {
+		return e.Exec(ctx, req)
+	}
+	return e.runner().Run(ctx, req)
 }
 
 func (e *CLIEngine) runner() *runner.Runner {
@@ -29,7 +43,7 @@ func (e *CLIEngine) dockerClient() docker.Client {
 	if e.Docker != nil {
 		return e.Docker
 	}
-	return &docker.CLIClient{Runner: e.runner()}
+	return &docker.CLIClient{Runner: e.runner(), GlobalFlags: e.GlobalFlags}
 }
 
 // Inspect reads the current container through the read-only discovery
@@ -66,8 +80,20 @@ func (e *CLIEngine) Rename(ctx context.Context, oldName, newName string) error {
 	return err
 }
 
+// Run starts the new container from the exact argv handed in by the
+// standalone pipeline — it already leads with the binary and any endpoint
+// flags — plus the extra environment for secret references.
 func (e *CLIEngine) Run(ctx context.Context, argv []string, env []string) error {
-	_, err := e.runEnv(ctx, 10*time.Minute, argv, env)
+	label := "docker run"
+	if len(argv) > 1 {
+		label = "docker " + argv[1]
+	}
+	_, err := e.exec(ctx, runner.Request{
+		Name:    label,
+		Argv:    argv,
+		Timeout: 10 * time.Minute,
+		Env:     env,
+	})
 	return err
 }
 
@@ -86,10 +112,13 @@ func (e *CLIEngine) run(ctx context.Context, timeout time.Duration, args ...stri
 }
 
 func (e *CLIEngine) runEnv(ctx context.Context, timeout time.Duration, args, env []string) (runner.Result, error) {
-	r := e.runner()
-	return r.Run(ctx, runner.Request{
+	// The verb list never carries the binary; build the full argv here so
+	// every engine invocation is ["docker", <endpoint flags>, verb...].
+	argv := append([]string{"docker"}, e.GlobalFlags...)
+	argv = append(argv, args...)
+	return e.exec(ctx, runner.Request{
 		Name:    "docker " + args[0],
-		Argv:    args,
+		Argv:    argv,
 		Timeout: timeout,
 		Env:     env,
 	})

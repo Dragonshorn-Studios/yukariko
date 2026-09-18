@@ -5,6 +5,11 @@
 # local tooling. See docs/config.md for the full schema and defaults.
 schema_version: 1
 
+# Machine-wide Docker endpoint for rootless or multi-daemon hosts; apps may
+# override it with their own docker block. Exactly one of context or host.
+# docker:
+#   host: unix:///run/user/1000/docker.sock
+
 # Read-only HTTP API and dashboard (off by default; binds to loopback only).
 server:
   enabled: false

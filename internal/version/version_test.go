@@ -56,7 +56,7 @@ func TestEnrichFromBuildInfo(t *testing.T) {
 			wantD:     "unknown",
 		},
 		{
-			name:    "git checkout reports revision and time",
+			name: "git checkout reports revision and time",
 			buildInfo: &debug.BuildInfo{
 				Main: debug.Module{Version: "(devel)"},
 				Settings: []debug.BuildSetting{
@@ -70,7 +70,7 @@ func TestEnrichFromBuildInfo(t *testing.T) {
 			wantD: "2026-09-18T06:00:00Z",
 		},
 		{
-			name:    "dirty checkout keeps dev despite synthesized version",
+			name: "dirty checkout keeps dev despite synthesized version",
 			buildInfo: &debug.BuildInfo{
 				Main: debug.Module{Version: "v1.0.0+dirty"},
 				Settings: []debug.BuildSetting{
@@ -84,7 +84,7 @@ func TestEnrichFromBuildInfo(t *testing.T) {
 			wantD: "2026-09-18T06:00:00Z",
 		},
 		{
-			name:    "short revision is kept as is",
+			name: "short revision is kept as is",
 			buildInfo: &debug.BuildInfo{
 				Main:     debug.Module{Version: "(devel)"},
 				Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: "abc123"}},

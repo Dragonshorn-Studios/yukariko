@@ -13,16 +13,17 @@ const (
 // App is one deployed application. ID is the stable identity used by the
 // store, scheduler, locks, and reports.
 type App struct {
-	ID          string   `yaml:"id"`
-	DisplayName string   `yaml:"display_name,omitempty"`
-	Enabled     *bool    `yaml:"enabled,omitempty"`
-	Interval    Duration `yaml:"interval,omitempty"`
-	Timeout     Duration `yaml:"timeout,omitempty"`
-	Retry       Retry    `yaml:"retry,omitempty"`
-	Source      Source   `yaml:"source"`
-	Deploy      Deploy   `yaml:"deploy"`
-	Steps       Steps    `yaml:"steps,omitempty"`
-	Health      *Health  `yaml:"health,omitempty"`
+	ID          string          `yaml:"id"`
+	DisplayName string          `yaml:"display_name,omitempty"`
+	Enabled     *bool           `yaml:"enabled,omitempty"`
+	Interval    Duration        `yaml:"interval,omitempty"`
+	Timeout     Duration        `yaml:"timeout,omitempty"`
+	Retry       Retry           `yaml:"retry,omitempty"`
+	Docker      *DockerEndpoint `yaml:"docker,omitempty"`
+	Source      Source          `yaml:"source"`
+	Deploy      Deploy          `yaml:"deploy"`
+	Steps       Steps           `yaml:"steps,omitempty"`
+	Health      *Health         `yaml:"health,omitempty"`
 }
 
 // Retry bounds exponential backoff after transient failures (issue #8).
