@@ -7,6 +7,9 @@ see [`docker-access.md`](docker-access.md) and [`security.md`](security.md).
 ## Installation
 
 1. Build or download the binary:
+   - One-liner (Linux): `curl -fsSL https://raw.githubusercontent.com/Dragonshorn-Studios/yukariko/main/scripts/install.sh | sudo sh`
+     — detects the architecture, verifies checksums, installs to
+     `/usr/local/bin/yukariko`.
    - Release: download `yukariko-<version>-linux-<arch>.tar.gz` and
      `SHA256SUMS` from the GitHub Releases page, verify with
      `sha256sum -c --ignore-missing`, unpack, and install the binary to
