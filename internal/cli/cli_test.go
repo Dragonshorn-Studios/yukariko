@@ -151,8 +151,12 @@ func TestRunExitCodes(t *testing.T) {
 
 	t.Run("missing config", func(t *testing.T) {
 		t.Parallel()
+		// Pinned to a non-root uid so the root-default contract cannot
+		// change the outcome when the suite runs as root.
+		app := NewApp()
+		app.euid = func() int { return 1000 }
 		stderr := &bytes.Buffer{}
-		code := Run(context.Background(), []string{"check"}, io.Discard, stderr)
+		code := app.Run(context.Background(), []string{"check"}, io.Discard, stderr)
 		if code != exitcode.Usage {
 			t.Fatalf("code %d", code)
 		}

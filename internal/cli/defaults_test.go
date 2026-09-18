@@ -85,28 +85,31 @@ func TestConfigPathFor(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("root path defaults are a Linux-only contract")
 	}
-	origUID, origRoot := effectiveUID, rootDefaultConfig
+	origRoot := rootDefaultConfig
 	t.Cleanup(func() {
-		effectiveUID, rootDefaultConfig = origUID, origRoot
+		rootDefaultConfig = origRoot
 	})
 
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
 	rootDefaultConfig = missing
 
 	t.Run("non-root still requires config", func(t *testing.T) {
-		effectiveUID = func() int { return 1000 }
 		a := NewApp()
+		a.euid = func() int { return 1000 }
 		if _, err := a.configPathFor(); !errors.Is(err, errUsage) {
 			t.Fatalf("want usage error, got %v", err)
 		}
 	})
 
-	t.Run("root default missing points at the installer", func(t *testing.T) {
-		effectiveUID = func() int { return 0 }
+	t.Run("root default missing points at the installer as a usage error", func(t *testing.T) {
 		a := NewApp()
+		a.euid = func() int { return 0 }
 		_, err := a.configPathFor()
 		if err == nil {
 			t.Fatal("want error for missing default config")
+		}
+		if !errors.Is(err, errUsage) {
+			t.Fatalf("want exit code 2 (usage), got %v", err)
 		}
 		if !strings.Contains(err.Error(), "scripts/install.sh") || !strings.Contains(err.Error(), missing) {
 			t.Fatalf("error should name the path and the installer, got: %v", err)
@@ -114,13 +117,13 @@ func TestConfigPathFor(t *testing.T) {
 	})
 
 	t.Run("root default present resolves", func(t *testing.T) {
-		effectiveUID = func() int { return 0 }
 		present := filepath.Join(t.TempDir(), "yukariko.yaml")
 		if err := os.WriteFile(present, []byte("schema_version: 1\napps: []\n"), 0o640); err != nil {
 			t.Fatal(err)
 		}
 		rootDefaultConfig = present
 		a := NewApp()
+		a.euid = func() int { return 0 }
 		got, err := a.configPathFor()
 		if err != nil || got != present {
 			t.Fatalf("got %q, %v", got, err)
@@ -128,8 +131,8 @@ func TestConfigPathFor(t *testing.T) {
 	})
 
 	t.Run("explicit config bypasses the default entirely", func(t *testing.T) {
-		effectiveUID = func() int { return 0 }
 		a := NewApp()
+		a.euid = func() int { return 0 }
 		a.opts.Config = "/does/not/exist.yaml"
 		got, err := a.configPathFor()
 		if err != nil || got != "/does/not/exist.yaml" {

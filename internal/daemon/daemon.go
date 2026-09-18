@@ -92,6 +92,9 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A root CLI pass sharing the service user's data dir must not leave
+	// root-owned store files behind; hand them to the dir's owner.
+	healRootOwnedStoreFiles(opts.DataDir)
 	// Startup retention cleanup; failures are non-fatal (bounded best effort).
 	_, _ = st.Cleanup(ctx, store.RetentionPolicy{
 		EventsDays:      opts.Config.Retention.EventsDays,

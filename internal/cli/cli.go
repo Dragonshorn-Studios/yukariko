@@ -31,6 +31,7 @@ type Options struct {
 // can inject fakes; production builds use the real implementations.
 type App struct {
 	opts         Options
+	euid         func() int
 	stdin        io.Reader
 	dockerClient docker.Client
 	gitProber    learn.GitProber

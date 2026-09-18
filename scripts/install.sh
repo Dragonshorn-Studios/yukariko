@@ -156,9 +156,11 @@ EOF
   note "wrote empty config ${SYS_CONF} (fill it with: sudo yukariko learn)"
 fi
 
-# Data directory matches the unit's ReadWritePaths/NoExecPaths.
+# Data directory matches the unit's ReadWritePaths/NoExecPaths. The
+# recursive chown heals store files a root CLI pass may have created as
+# root-owned before the service ever started.
 mkdir -p "${SYS_DATA_DIR}"
-chown "${SYS_USER}":"${SYS_USER}" "${SYS_DATA_DIR}"
+chown -R "${SYS_USER}":"${SYS_USER}" "${SYS_DATA_DIR}"
 chmod 0750 "${SYS_DATA_DIR}"
 note "data dir ${SYS_DATA_DIR} ready"
 

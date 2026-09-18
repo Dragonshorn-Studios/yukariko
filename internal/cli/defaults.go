@@ -18,8 +18,14 @@ var (
 	rootDefaultDataDir = "/var/lib/yukariko"
 )
 
-// effectiveUID is swapped in tests.
-var effectiveUID = os.Geteuid
+// uid reports the effective uid; the App field lets tests pin it so
+// no-flag behavior does not depend on the test environment's user.
+func (a *App) uid() int {
+	if a.euid != nil {
+		return a.euid()
+	}
+	return os.Geteuid()
+}
 
 // resolvePaths applies the root-aware path defaults. Explicit flags always
 // win. Root invocations on Linux fall back to the installer layout; every
@@ -42,10 +48,10 @@ func resolvePaths(configFlag, dataDirFlag string, euid int, goos string) (config
 }
 
 // configPathFor resolves the configuration path for a command. A root
-// invocation whose default config file is missing gets an actionable error
-// pointing at the installer instead of a bare open failure.
+// invocation whose default config file is missing gets an actionable usage
+// error pointing at the installer instead of a bare open failure.
 func (a *App) configPathFor() (string, error) {
-	path, _, defaulted := resolvePaths(a.opts.Config, a.opts.DataDir, effectiveUID(), runtime.GOOS)
+	path, _, defaulted := resolvePaths(a.opts.Config, a.opts.DataDir, a.uid(), runtime.GOOS)
 	if a.opts.Config != "" {
 		return path, nil
 	}
@@ -53,13 +59,13 @@ func (a *App) configPathFor() (string, error) {
 		return "", fmt.Errorf("--config is required: %w", errUsage)
 	}
 	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("no --config given and %s does not exist; pass --config or provision the system layout with scripts/install.sh: %w", path, err)
+		return "", fmt.Errorf("no --config given and %s does not exist; pass --config or provision the system layout with scripts/install.sh (%v): %w", path, err, errUsage)
 	}
 	return path, nil
 }
 
 // dataDirFor resolves the data directory for a command.
 func (a *App) dataDirFor() string {
-	_, dataDir, _ := resolvePaths(a.opts.Config, a.opts.DataDir, effectiveUID(), runtime.GOOS)
+	_, dataDir, _ := resolvePaths(a.opts.Config, a.opts.DataDir, a.uid(), runtime.GOOS)
 	return dataDir
 }

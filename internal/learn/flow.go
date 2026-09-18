@@ -520,13 +520,17 @@ func (f *flow) merge(original []byte, existed bool, apps []config.App) ([]byte, 
 
 // write performs backup, atomic temp write, and rename. The document was
 // already validated before this is called; the original is untouched on any
-// failure.
+// failure. The replacement preserves the original's permissions AND
+// ownership: a root `yukariko learn` must not leave a config the systemd
+// service user can no longer read.
 func (f *flow) write(original []byte, existed bool, newBytes []byte) (backupPath string, err error) {
 	path := f.opts.ConfigPath
 	mode := fs.FileMode(0o644)
+	uid, gid := -1, -1
 	if existed {
 		if fi, err := os.Stat(path); err == nil {
 			mode = fi.Mode().Perm()
+			uid, gid = fileOwner(fi)
 		}
 		now := f.opts.Now
 		if now.IsZero() {
@@ -535,6 +539,9 @@ func (f *flow) write(original []byte, existed bool, newBytes []byte) (backupPath
 		backupPath = path + ".learn-backup-" + now.Format("20060102-150405")
 		if err := os.WriteFile(backupPath, original, mode); err != nil {
 			return "", fmt.Errorf("write backup: %w", err)
+		}
+		if err := preserveOwner(backupPath, uid, gid); err != nil {
+			return "", fmt.Errorf("preserve backup owner: %w", err)
 		}
 	}
 	dir := filepath.Dir(path)
@@ -561,6 +568,9 @@ func (f *flow) write(original []byte, existed bool, newBytes []byte) (backupPath
 	}
 	if err = os.Chmod(tmpName, mode); err != nil {
 		return backupPath, fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err = preserveOwner(tmpName, uid, gid); err != nil {
+		return backupPath, fmt.Errorf("preserve owner: %w", err)
 	}
 	if err = os.Rename(tmpName, path); err != nil {
 		return backupPath, fmt.Errorf("replace config: %w", err)
