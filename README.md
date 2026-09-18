@@ -13,11 +13,17 @@ Host Docker, Compose, and Git remain the source of truth. Yukariko observes, rec
 
 ## Download
 
-Prebuilt Linux binaries are published on the [Releases page](https://github.com/Dragonshorn-Studios/yukariko/releases) for every `v*` tag:
+Install the latest release in one command (Linux, amd64 or arm64):
 
-1. Download `yukariko-<version>-linux-<arch>.tar.gz` (amd64 or arm64) and `SHA256SUMS`.
-2. Verify with `sha256sum -c --ignore-missing SHA256SUMS`.
-3. Unpack and install the binary to `/usr/local/bin/yukariko` (full walkthrough in [`docs/operations.md`](docs/operations.md)).
+```sh
+curl -fsSL https://raw.githubusercontent.com/Dragonshorn-Studios/yukariko/main/scripts/install.sh | sudo sh
+```
+
+The installer detects the architecture, verifies `SHA256SUMS`, and installs to `/usr/local/bin/yukariko`; run it from a checkout for options (`--to DIR`, `--version vX.Y.Z`).
+
+With a Go toolchain: `go install github.com/Dragonshorn-Studios/yukariko/cmd/yukariko@latest`.
+
+Manually: download `yukariko-<version>-linux-<arch>.tar.gz` and `SHA256SUMS` from the [Releases page](https://github.com/Dragonshorn-Studios/yukariko/releases), verify with `sha256sum -c --ignore-missing`, unpack, and install to `/usr/local/bin/yukariko` (full walkthrough in [`docs/operations.md`](docs/operations.md)).
 
 ## Build
 
