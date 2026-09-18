@@ -65,6 +65,7 @@ Every command is operational. Each themed alias is the same command with identic
 | `update` | `bless` | One deployment pass for `--app <id>` or `--all` through preflight and the per-app lock (`--dry-run` previews) |
 | `status` | `observe` | Deployed vs observed versions, pending updates, health, last deployment (`--json`) |
 | `logs` | `chronicle` | Bounded, filterable structured event history (`--json`) |
+| `expose` | — | Grant the strict systemd unit write access to a git worktree (run from its directory) or a rootless Docker socket, via the `ReadWritePaths` drop-in (`sudo`, idempotent) |
 | `learn` | — | One-time onboarding: scan local Docker read-only, select candidates, resolve required fields, preview a YAML diff, import after explicit confirmation |
 
 `yukariko learn --config yukariko.yaml` scans running and stopped containers (never mutating Docker), proposes one app per Compose project and per standalone container, and writes only after you confirm the diff — with a timestamped backup, atomic replacement, and full re-validation. Existing manual settings (intervals, retries, steps, health, enabled) survive merges. Flags: `--dry-run` previews without writing, `--json` prints machine-readable proposals without prompts, `--include-system` offers system/infrastructure candidates (excluded by default). learn never deploys anything; monitoring starts when the daemon runs.

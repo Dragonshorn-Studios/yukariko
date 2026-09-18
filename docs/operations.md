@@ -68,6 +68,17 @@ curl -fsSL https://raw.githubusercontent.com/Dragonshorn-Studios/yukariko/main/s
 Keep the grant minimal: one entry per worktree, nothing broader. The unit
 stays strict by default; drop-ins are the operator's explicit decision.
 
+The same grant, one command at a time: `sudo yukariko expose` from inside
+a project directory (or `sudo yukariko expose <path>`) adds the resolved
+path to the same drop-in idempotently, always reloads systemd (a rerun
+heals a previously failed reload), and handles the `ProtectHome` case
+automatically for paths under `/home`, `/root`, and `/run/user`. The
+installer and `expose` merge into this drop-in — neither truncates the
+other's entries.
+It also accepts rootless Docker sockets
+(`sudo yukariko expose /run/user/<uid>/docker.sock`); the installer
+suggests this when it detects rootless sockets on the host.
+
 ## Upgrades
 
 - Replace the binary (same path), then `systemctl restart yukariko`.
