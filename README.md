@@ -6,10 +6,18 @@ Host Docker, Compose, and Git remain the source of truth. Yukariko observes, rec
 
 ## Prerequisites
 
-- Go 1.24 or later to build from source
+- Go 1.25 or later to build from source
 - Linux is the intended operations target (systemd packaging comes later)
 - Windows and macOS are supported for development and tests
 - Docker Engine, Compose, and Git are required only once those features land
+
+## Download
+
+Prebuilt Linux binaries are published on the [Releases page](https://github.com/Dragonshorn-Studios/yukariko/releases) for every `v*` tag:
+
+1. Download `yukariko-<version>-linux-<arch>.tar.gz` (amd64 or arm64) and `SHA256SUMS`.
+2. Verify with `sha256sum -c --ignore-missing SHA256SUMS`.
+3. Unpack and install the binary to `/usr/local/bin/yukariko` (full walkthrough in [`docs/operations.md`](docs/operations.md)).
 
 ## Build
 

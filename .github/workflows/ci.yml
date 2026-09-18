@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race)
+        run: go test -race ./...
+      # CI compiles the Linux build tags only; smoke-compile the Windows
+      # runner files so kill_windows.go breakage is caught here too.
+      - name: Windows compile smoke
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
