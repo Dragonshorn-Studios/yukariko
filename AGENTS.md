@@ -48,13 +48,6 @@ Complete (#1–#19): the MVP scope is frozen.
 - `internal/exitcode` — stable process codes
 
 New packages require an issue that updates this file first.
-| `internal/git` | #9 |
-| `internal/registry` | #10 |
-| `internal/deploy` | #11–#12 |
-| `internal/health` | #13 |
-| `internal/httpapi` | #15 |
-| `internal/ui` | #16 |
-| `internal/report` | #17–#18 |
 
 ## Commands
 
@@ -82,7 +75,7 @@ Version injection:
 go build -ldflags "-X github.com/Dragonshorn-Studios/yukariko/internal/version.Version=<ver> -X github.com/Dragonshorn-Studios/yukariko/internal/version.Commit=<sha> -X github.com/Dragonshorn-Studios/yukariko/internal/version.Date=<date>" -o yukariko.exe ./cmd/yukariko
 ```
 
-Do not add CI, Makefiles, or extra toolchains unless the current issue requires them.
+CI lives in `.github/workflows`: `ci.yml` gates pushes and pull requests (vet, race tests, Windows cross-compile smoke); `release.yml` builds tag-driven releases (`v*` tags) with `scripts/build-release.sh` and publishes them via the runner's `gh` CLI (a `workflow_dispatch` run is a no-publish dry-run). Do not add Makefiles, goreleaser, or extra toolchains.
 
 On the Windows ARM64 dev host, Smart App Control may block freshly built test
 binaries that spawn or kill child processes (observed with the runner tests).

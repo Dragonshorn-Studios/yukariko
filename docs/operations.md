@@ -7,8 +7,10 @@ see [`docker-access.md`](docker-access.md) and [`security.md`](security.md).
 ## Installation
 
 1. Build or download the binary:
-   - Release: unpack `yukariko-<version>-linux-<arch>` and its SHA256SUMS,
-     verify with `sha256sum -c`, install to `/usr/local/bin/yukariko`.
+   - Release: download `yukariko-<version>-linux-<arch>.tar.gz` and
+     `SHA256SUMS` from the GitHub Releases page, verify with
+     `sha256sum -c --ignore-missing`, unpack, and install the binary to
+     `/usr/local/bin/yukariko`.
    - From source: `scripts/build-release.sh <version>` (reproducible flags,
      checksums emitted).
 2. Create a dedicated user and directories:

@@ -5,6 +5,9 @@
 *.test
 *.out
 
+# Release build output
+/dist/
+
 # Coverage
 coverage.out
 coverage.html
@@ -12,6 +15,7 @@ coverage.html
 # IDE / OS
 .idea/
 .vscode/
+.zcode/
 *.swp
 Thumbs.db
 .DS_Store
