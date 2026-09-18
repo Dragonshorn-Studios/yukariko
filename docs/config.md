@@ -248,7 +248,10 @@ reporting:
 Reports carry status only — never commands. Inbound host IDs are an
 allowlist: removing a host (or a key) revokes it; multiple keys support
 rotation. Details land with issues #17/#18; this schema is stable now so
-configurations do not churn.
+configurations do not churn. Inbound reporting shares the `server` listener:
+a receiver host must also set `server.enabled: true` (and `server.bind` to
+a reachable address) — `yukariko run` refuses to start an inbound listener
+with no configured address rather than bind a random port.
 
 ## Validation summary
 

@@ -72,7 +72,13 @@ func (a *App) newRunCommand() *cobra.Command {
 
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "yukariko daemon running (data dir %s); Docker and Compose directories remain the source of truth.\n", opts.DataDir)
-			if asm.APIOn || asm.ReportHandler != nil || true {
+			if asm.APIOn || asm.ReportHandler != nil {
+				if asm.APIBind == "" {
+					// Inbound reporting without the server section: there is
+					// no configured address. Refuse rather than bind a random
+					// port on every interface.
+					return fmt.Errorf("inbound reporting is enabled but server.enabled is false; set server.enabled and server.bind so the report listener has an address: %w", errUsage)
+				}
 				mux := http.NewServeMux()
 				mux.Handle("/ui", asm.UI)
 				mux.Handle("/ui/", asm.UI)
