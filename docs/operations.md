@@ -40,6 +40,34 @@ A clean host following these steps can `learn`/import, `run`, `status`,
 `update`, and inspect `logs` — `yukariko --help` lists the commands and
 their documented exit codes (0 ok, 1 error, 2 usage, 130 interrupted).
 
+## Git-source apps under systemd
+
+The shipped unit is deliberately strict: only `/var/lib/yukariko` is
+writable (`ProtectSystem=strict`) and `/home` is inaccessible
+(`ProtectHome=yes`). Registry and standalone apps work under it unchanged,
+but git sources write to their worktrees — `git fetch` updates `.git` and
+the fast-forward merge updates the working tree — so every git app's
+worktree must be exposed to the unit through a drop-in before the daemon
+can deploy it:
+
+```ini
+# /etc/systemd/system/yukariko.service.d/writables.conf
+[Service]
+ReadWritePaths=/srv/ghost        # appends; the data-dir entry stays
+# ProtectHome=read-only          # uncomment if configs live under /home
+```
+
+Then `systemctl daemon-reload && systemctl restart yukariko`. The
+installer automates this — repeat `--read-write` per worktree:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Dragonshorn-Studios/yukariko/main/scripts/install.sh \
+  | sudo sh -s -- --read-write /srv/ghost --home-read
+```
+
+Keep the grant minimal: one entry per worktree, nothing broader. The unit
+stays strict by default; drop-ins are the operator's explicit decision.
+
 ## Upgrades
 
 - Replace the binary (same path), then `systemctl restart yukariko`.

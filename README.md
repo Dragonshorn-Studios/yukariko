@@ -19,7 +19,7 @@ Install the latest release in one command (Linux, amd64 or arm64):
 curl -fsSL https://raw.githubusercontent.com/Dragonshorn-Studios/yukariko/main/scripts/install.sh | sudo sh
 ```
 
-The installer detects the architecture, verifies `SHA256SUMS`, and installs to `/usr/local/bin/yukariko`. Run as root (`| sudo sh`) it also provisions the daemon's system layout: a dedicated `yukariko` user, `/etc/yukariko/yukariko.yaml` (only if absent), `/var/lib/yukariko`, and the systemd unit — after which `sudo yukariko learn` and `sudo yukariko run` need no flags. Options when run from a checkout: `--to DIR`, `--version vX.Y.Z`, `--docker-group` (grants the root-equivalent docker group; see `docs/docker-access.md`), `--no-system-setup`.
+The installer detects the architecture, verifies `SHA256SUMS`, and installs to `/usr/local/bin/yukariko`. Run as root (`| sudo sh`) it also provisions the daemon's system layout: a dedicated `yukariko` user, `/etc/yukariko/yukariko.yaml` (only if absent), `/var/lib/yukariko`, and the systemd unit — after which `sudo yukariko learn` and `sudo yukariko run` need no flags. Options when run from a checkout: `--to DIR`, `--version vX.Y.Z`, `--docker-group` (grants the root-equivalent docker group; see `docs/docker-access.md`), `--no-system-setup`, and `--read-write DIR` (exposes git-source worktrees to the strict unit via a systemd drop-in; see `docs/operations.md`).
 
 With a Go toolchain: `go install github.com/Dragonshorn-Studios/yukariko/cmd/yukariko@latest`.
 
