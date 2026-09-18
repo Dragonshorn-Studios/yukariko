@@ -11,11 +11,18 @@ import (
 const defaultDataDir = "data"
 
 // The system layout provisioned by scripts/install.sh: a root invocation on
-// Linux uses these paths when the flags are omitted. Vars (not consts) so
-// tests can point them somewhere hermetic.
+// Linux uses these paths when the flags are omitted. Exported because the
+// installer's defaults are a second copy that must not drift (pinned by
+// TestInstallScriptDefaultsMatch); the vars let tests point resolution
+// somewhere hermetic.
+const (
+	RootDefaultConfig  = "/etc/yukariko/yukariko.yaml"
+	RootDefaultDataDir = "/var/lib/yukariko"
+)
+
 var (
-	rootDefaultConfig  = "/etc/yukariko/yukariko.yaml"
-	rootDefaultDataDir = "/var/lib/yukariko"
+	rootDefaultConfig  = RootDefaultConfig
+	rootDefaultDataDir = RootDefaultDataDir
 )
 
 // uid reports the effective uid; the App field lets tests pin it so

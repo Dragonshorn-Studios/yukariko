@@ -23,25 +23,26 @@ func dirOwner(path string) (uid, gid int) {
 	return int(st.Uid), int(st.Gid)
 }
 
-// healRootOwnedStoreFiles hands root-created database files (and their WAL
-// sidecars) to the data directory's owner. A root CLI pass — `sudo yukariko
-// status` against the installer's /var/lib/yukariko — must not poison the
-// systemd service user out of its own store. Best effort: failures never
-// block assembly, and it is a no-op unless running as root over a
-// non-root-owned directory.
-func healRootOwnedStoreFiles(dataDir string) {
-	if os.Geteuid() != 0 {
-		return
-	}
-	uid, gid := dirOwner(dataDir)
-	if uid <= 0 || gid < 0 {
-		return // root-owned or unknown: nothing to heal toward
+// healStoreFiles hands the directory's database files (and WAL sidecars) to
+// the directory owner when invoked as root. The seams exist so tests can
+// verify the decision without privileges; chown failures are best effort.
+func healStoreFiles(dataDir string, euid, dirUID, dirGID int, chown func(path string, uid, gid int) error) {
+	if euid != 0 || dirUID <= 0 || dirGID < 0 {
+		return // not root, or nothing (root-owned/unknown) to heal toward
 	}
 	matches, err := filepath.Glob(filepath.Join(dataDir, store.DBFileName+"*"))
 	if err != nil {
 		return
 	}
 	for _, m := range matches {
-		_ = os.Chown(m, uid, gid)
+		_ = chown(m, dirUID, dirGID)
 	}
+}
+
+// healRootOwnedStoreFiles is the production seam set: a root CLI pass —
+// `sudo yukariko status` against the installer's /var/lib/yukariko — must
+// not poison the systemd service user out of its own store.
+func healRootOwnedStoreFiles(dataDir string) {
+	uid, gid := dirOwner(dataDir)
+	healStoreFiles(dataDir, os.Geteuid(), uid, gid, os.Chown)
 }

@@ -140,3 +140,22 @@ func TestConfigPathFor(t *testing.T) {
 		}
 	})
 }
+
+// The installer's system-layout defaults are a second copy of the binary's
+// root defaults; this pins them so neither side can drift silently.
+func TestInstallScriptDefaultsMatch(t *testing.T) {
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install.sh"))
+	if err != nil {
+		t.Fatalf("read install.sh: %v", err)
+	}
+	want := []string{
+		`SYS_CONF_DIR="${YUKARIKO_SYS_CONF_DIR:-` + filepath.Dir(RootDefaultConfig) + `}"`,
+		`SYS_DATA_DIR="${YUKARIKO_SYS_DATA_DIR:-` + RootDefaultDataDir + `}"`,
+		`SYS_UNIT="${YUKARIKO_SYS_UNIT:-/etc/systemd/system/yukariko.service}"`,
+	}
+	for _, w := range want {
+		if !strings.Contains(string(script), w) {
+			t.Errorf("install.sh no longer contains %q — update it together with the root defaults", w)
+		}
+	}
+}
