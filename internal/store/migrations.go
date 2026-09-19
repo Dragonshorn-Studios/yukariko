@@ -139,4 +139,19 @@ CREATE TABLE remote_state (
 );
 `,
 	},
+	{
+		version: 2,
+		ddl: `
+-- One open (running) deployment per app, enforced at the database so
+-- separate processes (daemon, manual CLI) cannot race past an in-memory
+-- check. Ghost rows from passes whose process died are reaped FIRST:
+-- creating the index would fail on databases that accumulated several.
+UPDATE deployments
+   SET status = 'interrupted', ended_at = started_at,
+       error = 'stale: reaped by migration 2 (the owning pass is gone)'
+ WHERE status = 'running';
+CREATE UNIQUE INDEX idx_deployments_open_per_app
+    ON deployments(app_id) WHERE status = 'running';
+`,
+	},
 }

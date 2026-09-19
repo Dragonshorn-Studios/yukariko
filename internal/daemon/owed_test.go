@@ -85,3 +85,53 @@ func TestGitCheckOwesDeploymentUntilCheckpointed(t *testing.T) {
 		t.Fatalf("res = unchanged after remote advanced (detail %q)", res.Detail)
 	}
 }
+
+// A fresh open deployment row from another process bails the pass with a
+// clear message; a row older than any live pass could be is reaped and
+// the claim retries.
+func TestClaimDeployment(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	d := &DeployDispatcher{store: st}
+	app := &config.App{ID: "web"}
+
+	// Fresh row held elsewhere: bail.
+	held, err := st.BeginDeployment(ctx, store.BeginDeploymentParams{AppID: "web", Cause: "scheduled", At: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.claimDeployment(ctx, app)
+	if err == nil || !strings.Contains(err.Error(), "already in progress") || !strings.Contains(err.Error(), "scheduled") {
+		t.Fatalf("err = %v, want the in-progress bail naming the holder", err)
+	}
+
+	// Same row, aged past the budget: reaped, claim succeeds.
+	old := time.Now().Add(-deploymentBudget(app) - time.Minute)
+	if err := st.FinishDeployment(ctx, held, store.StatusInterrupted, "test reset", old); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := st.BeginDeployment(ctx, store.BeginDeploymentParams{AppID: "web", Cause: "scheduled", At: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = stale
+	claimed, err := d.claimDeployment(ctx, app)
+	if err != nil {
+		t.Fatalf("claim after stale = %v", err)
+	}
+	rows, _ := st.RecentDeployments(ctx, "web", 5)
+	interrupted := 0
+	for _, r := range rows {
+		if r.Status == store.StatusInterrupted && strings.Contains(r.Error, "owning process is gone") {
+			interrupted++
+		}
+	}
+	if interrupted != 1 {
+		t.Fatalf("stale reap count = %d, rows %+v", interrupted, rows)
+	}
+	_ = claimed
+}
