@@ -2,6 +2,8 @@ package git
 
 import (
 	"context"
+
+	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"errors"
 	"os"
 	"os/exec"
@@ -357,5 +359,26 @@ func TestDefaultRemoteFallback(t *testing.T) {
 	}
 	if res.Status != StatusUpToDate {
 		t.Fatalf("status = %q detail = %q, want up_to_date via the origin default", res.Status, res.Detail)
+	}
+}
+
+// Every git invocation scopes safe.directory to the worktree so checks and
+// prepares are not refused with "dubious ownership" when Yukariko runs as
+// a different user than the worktree's owner (root CLI passes, the systemd
+// service user) — the same rule learn's probe already follows.
+func TestGitArgvCarriesSafeDirectory(t *testing.T) {
+	t.Parallel()
+	var got []string
+	c := &Client{Run: func(_ context.Context, req runner.Request) (runner.Result, error) {
+		got = req.Argv
+		return runner.Result{Status: runner.StatusSuccess, Stdout: []byte("abc123 refs/heads/main\n")}, nil
+	}}
+	if _, err := c.lsRemote(context.Background(), "/home/u/proj", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"git", "-c", "safe.directory=/home/u/proj", "-C", "/home/u/proj",
+		"ls-remote", "origin", "refs/heads/main"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("argv = %v, want %v", got, want)
 	}
 }
