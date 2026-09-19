@@ -98,6 +98,10 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		return nil, err
 	}
 	healRootOwnedStoreFiles(opts.DataDir)
+	// Interrupt running-deployment rows no live pass could still own (the
+	// process died mid-deploy); they would otherwise block the app's next
+	// pass forever. Generous by design - real budgets are minutes.
+	_, _ = st.ReapStaleDeployments(ctx, time.Hour, "stale: reaped at startup (the owning process is gone)", time.Now())
 	// Startup retention cleanup; failures are non-fatal (bounded best effort).
 	_, _ = st.Cleanup(ctx, store.RetentionPolicy{
 		EventsDays:      opts.Config.Retention.EventsDays,
@@ -362,9 +366,7 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 	if app.Source.Mode == config.SourceGit {
 		kind = store.KindGitSHA
 	}
-	depID, err := d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
-		AppID: app.ID, Cause: "update", At: time.Now(),
-	})
+	depID, err := d.claimDeployment(ctx, app)
 	if err != nil {
 		return schedule.DeployResult{}, err
 	}
@@ -413,6 +415,53 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 	// Success: the pipeline's checkpoint already committed the deployment
 	// transaction; nothing further mutates the deployed version here.
 	return res, nil
+}
+
+// deploymentBudget is the longest a pass may run before its open
+// deployment row is provably orphaned; no live pass outlives it.
+func deploymentBudget(app *config.App) time.Duration {
+	budget := app.Timeout.D()
+	if budget <= 0 {
+		budget = config.DefaultTimeout.D()
+	}
+	return budget + 5*time.Minute
+}
+
+// claimDeployment opens the app's single running deployment row. The
+// partial unique index makes this the cross-process counterpart of the
+// scheduler's in-memory per-app lock: when another pass (daemon or manual
+// CLI) holds a fresh row, this pass bails with a clear message; when the
+// row is older than any live pass could be, the owning process is gone
+// and the row is reaped so one crash cannot block the app forever.
+func (d *DeployDispatcher) claimDeployment(ctx context.Context, app *config.App) (string, error) {
+	depID, err := d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
+		AppID: app.ID, Cause: "update", At: time.Now(),
+	})
+	if err == nil || !errors.Is(err, store.ErrDeploymentInProgress) {
+		return depID, err
+	}
+	open, ok, oerr := d.store.OpenDeployment(ctx, app.ID)
+	if oerr != nil {
+		return "", oerr
+	}
+	if !ok {
+		// The row vanished between insert and read; retry the claim once.
+		return d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
+			AppID: app.ID, Cause: "update", At: time.Now(),
+		})
+	}
+	age := time.Since(open.StartedAt)
+	if age > deploymentBudget(app) {
+		if ferr := d.store.FinishDeployment(ctx, open.ID, store.StatusInterrupted,
+			fmt.Sprintf("stale: pass ran %s, past its budget; the owning process is gone", age.Round(time.Second)), time.Now()); ferr != nil {
+			return "", ferr
+		}
+		return d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
+			AppID: app.ID, Cause: "update", At: time.Now(),
+		})
+	}
+	return "", fmt.Errorf("deployment already in progress for %s (started %s ago, cause %q) - not starting a second pass; retry after it finishes",
+		app.ID, age.Round(time.Second), open.Cause)
 }
 
 // boundCheckpoint is the per-run VersionCheckpoint bound to one open

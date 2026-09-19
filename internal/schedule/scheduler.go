@@ -257,7 +257,7 @@ func (s *Scheduler) loop(ctx context.Context, id string, started chan struct{}) 
 		if !ok {
 			s.record(Event{AppID: id, Kind: EventSkipLocked, Detail: "scheduled pass skipped; another pass holds the app lock"})
 		} else {
-			s.pass(ctx, app)
+			s.pass(ctx, app, "scheduled")
 			release()
 		}
 		if ctx.Err() != nil {
@@ -292,7 +292,7 @@ func (s *Scheduler) Trigger(ctx context.Context, appID string) error {
 		}
 	}
 	defer release()
-	s.pass(ctx, app)
+	s.pass(ctx, app, "manual")
 	return nil
 }
 
@@ -361,7 +361,7 @@ func (s *Scheduler) Statuses() []AppStatus {
 
 // pass runs one full update attempt for an app. The per-app lock is already
 // held by the caller.
-func (s *Scheduler) pass(ctx context.Context, app *config.App) {
+func (s *Scheduler) pass(ctx context.Context, app *config.App, origin string) {
 	// Global concurrency gate: at most N apps work at once; the rest queue
 	// here, independently of their per-app lock.
 	select {
@@ -372,7 +372,7 @@ func (s *Scheduler) pass(ctx context.Context, app *config.App) {
 	}
 	defer func() { <-s.sem }()
 
-	s.transition(app.ID, StateChecking, "update pass started")
+	s.transition(app.ID, StateChecking, "update pass started ("+origin+")")
 
 	res, err := s.checker().Check(ctx, app)
 	if ctx.Err() != nil {

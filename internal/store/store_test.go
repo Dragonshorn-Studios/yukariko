@@ -27,8 +27,8 @@ func TestMigrateFromEmptyAndReopen(t *testing.T) {
 		t.Fatalf("first Open failed: %v", err)
 	}
 	v, err := s.Version()
-	if err != nil || v != 1 {
-		t.Fatalf("version after first migrate = %d, %v; want 1", v, err)
+	if err != nil || v != len(migrations) {
+		t.Fatalf("version after first migrate = %d, %v; want %d", v, err, len(migrations))
 	}
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close failed: %v", err)
@@ -40,8 +40,8 @@ func TestMigrateFromEmptyAndReopen(t *testing.T) {
 	}
 	defer s2.Close()
 	v2, err := s2.Version()
-	if err != nil || v2 != 1 {
-		t.Fatalf("version after reopen = %d, %v; want 1 (idempotent)", v2, err)
+	if err != nil || v2 != len(migrations) {
+		t.Fatalf("version after reopen = %d, %v; want %d (idempotent)", v2, err, len(migrations))
 	}
 }
 
@@ -62,8 +62,8 @@ func TestOpenPathWithSpacesAndHash(t *testing.T) {
 		t.Fatalf("Open with special characters in path failed: %v", err)
 	}
 	defer s.Close()
-	if v, err := s.Version(); err != nil || v != 1 {
-		t.Fatalf("version = %d, %v", v, err)
+	if v, err := s.Version(); err != nil || v != len(migrations) {
+		t.Fatalf("version = %d, %v; want %d", v, err, len(migrations))
 	}
 }
 

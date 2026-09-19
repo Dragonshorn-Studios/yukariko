@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,11 @@ const (
 // the running state but is not (already finished, or never begun).
 var ErrDeploymentNotRunning = errors.New("deployment is not running")
 
+// ErrDeploymentInProgress is returned by BeginDeployment when another pass
+// still holds the app's single open deployment row — the cross-process
+// counterpart of the scheduler's per-app lock.
+var ErrDeploymentInProgress = errors.New("deployment already in progress")
+
 // BeginDeploymentParams describes one update attempt.
 type BeginDeploymentParams struct {
 	AppID       string
@@ -29,7 +35,10 @@ type BeginDeploymentParams struct {
 	At          time.Time
 }
 
-// BeginDeployment records a new running deployment and returns its ID.
+// BeginDeployment records a new running deployment and returns its ID. At
+// most one running row may exist per app (partial unique index): a second
+// begin while one is open fails with ErrDeploymentInProgress, so manual
+// and scheduled passes across processes cannot overlap silently.
 func (s *Store) BeginDeployment(ctx context.Context, p BeginDeploymentParams) (string, error) {
 	id := newID()
 	_, err := s.db.ExecContext(ctx,
@@ -37,9 +46,54 @@ func (s *Store) BeginDeployment(ctx context.Context, p BeginDeploymentParams) (s
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		id, p.AppID, p.Cause, p.FromVersion, p.ToVersion, StatusRunning, rfc3339(p.At))
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return "", fmt.Errorf("begin deployment for %s: %w", p.AppID, ErrDeploymentInProgress)
+		}
 		return "", fmt.Errorf("begin deployment: %w", err)
 	}
 	return id, nil
+}
+
+// OpenDeployment returns the app's currently running deployment, if any.
+func (s *Store) OpenDeployment(ctx context.Context, appID string) (Deployment, bool, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, app_id, cause, from_version, to_version, status, started_at, ended_at, error
+		 FROM deployments WHERE app_id = ? AND status = ?
+		 ORDER BY started_at DESC LIMIT 1`,
+		appID, StatusRunning)
+	if err != nil {
+		return Deployment{}, false, fmt.Errorf("read open deployment: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return Deployment{}, false, rows.Err()
+	}
+	var d Deployment
+	var started, ended sql.NullString
+	var failure sql.NullString
+	if err := rows.Scan(&d.ID, &d.AppID, &d.Cause, &d.FromVersion, &d.ToVersion,
+		&d.Status, &started, &ended, &failure); err != nil {
+		return Deployment{}, false, fmt.Errorf("scan open deployment: %w", err)
+	}
+	d.StartedAt, _ = time.Parse(time.RFC3339Nano, started.String)
+	d.Error = failure.String
+	return d, true, rows.Err()
+}
+
+// ReapStaleDeployments interrupts running deployments older than maxAge —
+// rows whose owning pass died with its process — and returns how many.
+// No live pass can outlive its budget, so a generous maxAge is safe.
+func (s *Store) ReapStaleDeployments(ctx context.Context, maxAge time.Duration, reason string, now time.Time) (int, error) {
+	cutoff := now.Add(-maxAge)
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE deployments SET status = ?, ended_at = ?, error = ?
+		 WHERE status = ? AND started_at < ?`,
+		StatusInterrupted, rfc3339(now), reason, StatusRunning, rfc3339(cutoff))
+	if err != nil {
+		return 0, fmt.Errorf("reap stale deployments: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // FinishDeployment moves a running deployment to failed or interrupted. It

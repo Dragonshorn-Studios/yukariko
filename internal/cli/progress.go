@@ -23,7 +23,9 @@ func streamPassEvents(ctx context.Context, out io.Writer, st *store.Store, appID
 	for {
 		select {
 		case <-finished:
-			printNewEvents(ctx, out, st, appID, &last, start)
+			// No final drain: the command prints its own summary line for
+			// the terminal state right after this, and draining would print
+			// the same text twice.
 			return
 		case <-ctx.Done():
 			return

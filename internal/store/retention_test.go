@@ -42,7 +42,9 @@ func TestRetentionBoundaries(t *testing.T) {
 	if err := s.CommitDeploymentSuccess(ctx, "app", KindGitSHA, "oldsha", oldID, now.AddDate(-2, 0, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.BeginDeployment(ctx, BeginDeploymentParams{AppID: "app", Cause: "scheduled", At: now.AddDate(-2, 0, 0)}); err != nil {
+	// A second app's old running row stays too (one OPEN row per app is
+	// enforced since migration 2, so this fixture uses its own app id).
+	if _, err := s.BeginDeployment(ctx, BeginDeploymentParams{AppID: "zombie", Cause: "scheduled", At: now.AddDate(-2, 0, 0)}); err != nil {
 		t.Fatal(err)
 	}
 	// A terminal deployment inside the window stays.
