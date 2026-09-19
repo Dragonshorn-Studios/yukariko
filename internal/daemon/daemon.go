@@ -276,10 +276,24 @@ func (c *SourceChecker) Check(ctx context.Context, app *config.App) (schedule.Ch
 				return schedule.CheckResult{}, err
 			}
 		}
+		changed, detail := res.Status == git.StatusChanged, res.Detail
+		// The worktree can already sit at the remote SHA after a cancelled
+		// or failed pass (prepare merged, the success checkpoint never
+		// advanced). A deployment stays owed until the checkpoint catches
+		// up — the mirror of "only the checkpoint advances the deployed
+		// version" — or a cancelled pass would be silently forgotten.
+		if !changed && res.ObservedSHA != "" {
+			if deployed, _, ok, err := c.store.DeployedVersion(ctx, app.ID, store.KindGitSHA); err != nil {
+				return schedule.CheckResult{}, err
+			} else if !ok || deployed != res.ObservedSHA {
+				changed = true
+				detail = "remote already in the worktree but not checkpointed as deployed (cancelled or failed pass); deployment owed"
+			}
+		}
 		return schedule.CheckResult{
-			Changed:  res.Status == git.StatusChanged,
+			Changed:  changed,
 			Observed: res.ObservedSHA,
-			Detail:   res.Detail,
+			Detail:   detail,
 		}, nil
 
 	case config.SourceRegistry:

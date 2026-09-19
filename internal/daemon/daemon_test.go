@@ -77,8 +77,10 @@ func TestSourceCheckerGitDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Changed || res.Observed != sha {
-		t.Errorf("res = %+v, want unchanged at %q", res, sha)
+	// Never checkpointed: the deployment is owed even though the worktree
+	// already sits at the remote SHA (first run, or a cancelled pass).
+	if !res.Changed || res.Observed != sha || !strings.Contains(res.Detail, "deployment owed") {
+		t.Errorf("res = %+v, want owed at %q", res, sha)
 	}
 	if v, _, ok, _ := st.ObservedVersion(context.Background(), "g", store.KindGitSHA); !ok || v != sha {
 		t.Errorf("observed = %q ok=%v, want the SHA recorded separately", v, ok)
