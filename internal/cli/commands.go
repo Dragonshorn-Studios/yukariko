@@ -233,6 +233,9 @@ every configured app.`,
 			}
 			sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
 
+			if !dryRun {
+				fmt.Fprintln(cmd.OutOrStdout(), "pass in flight; first builds can take minutes - live stages below (kept in 'yukariko logs --app <id>')")
+			}
 			failed := false
 			for _, app := range targets {
 				if dryRun {
@@ -242,8 +245,18 @@ every configured app.`,
 					continue
 				}
 				// Trigger enters the same preflight/lock/state machine the
-				// scheduler uses and queues on the per-app lock.
-				if err := asm.Scheduler.Trigger(cmd.Context(), app.ID); err != nil {
+				// scheduler uses and queues on the per-app lock. While it
+				// runs, mirror new state events to the terminal so long
+				// builds show live progress (command output itself is never
+				// streamed: it is captured and redacted by the runner).
+				errCh := make(chan error, 1)
+				finished := make(chan struct{})
+				go func(id string) {
+					errCh <- asm.Scheduler.Trigger(cmd.Context(), id)
+					close(finished)
+				}(app.ID)
+				streamPassEvents(cmd.Context(), cmd.OutOrStdout(), asm.Store, app.ID, finished, time.Now())
+				if err := <-errCh; err != nil {
 					failed = true
 					fmt.Fprintf(cmd.OutOrStdout(), "%-16s FAILED: %v\n", app.ID, err)
 					continue
