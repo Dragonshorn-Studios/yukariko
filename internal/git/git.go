@@ -71,6 +71,9 @@ type Client struct {
 	// Runner executes git commands. Its Sink must stay nil: git command
 	// output is never persisted (it can carry paths and remote URLs).
 	Runner *runner.Runner
+	// Run overrides command execution (tests inject a recorder). When nil,
+	// Runner.Run is used.
+	Run func(ctx context.Context, req runner.Request) (runner.Result, error)
 	// FetchTimeout bounds network commands (ls-remote, fetch); zero means
 	// 2 minutes. Local commands get a shorter fixed budget.
 	FetchTimeout time.Duration
@@ -326,11 +329,15 @@ func (c *Client) run(ctx context.Context, dir string, timeout time.Duration, arg
 	if r == nil {
 		r = &runner.Runner{}
 	}
-	return r.Run(ctx, runner.Request{
+	req := runner.Request{
 		Name:    "git " + args[0],
-		Argv:    append([]string{"git", "-C", dir}, args...),
+		Argv:    append([]string{"git", "-c", "safe.directory=" + dir, "-C", dir}, args...),
 		Timeout: timeout,
-	})
+	}
+	if c.Run != nil {
+		return c.Run(ctx, req)
+	}
+	return r.Run(ctx, req)
 }
 
 // failureText renders one command failure. Output was already redacted by
