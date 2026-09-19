@@ -79,6 +79,31 @@ It also accepts rootless Docker sockets
 (`sudo yukariko expose /run/user/<uid>/docker.sock`); the installer
 suggests this when it detects rootless sockets on the host.
 
+### Watching several users' projects
+
+Yukariko is designed for homelabs — one administrator, one daemon — but
+projects and rootless daemons may belong to different login users. Two
+supported layouts:
+
+- **Root daemon (simplest for multi-user setups):** a unit drop-in with
+  `[Service]` `User=root` / `Group=root`. Root reaches every worktree and
+  every rootless socket; the unit's `ProtectSystem=strict` sandbox plus
+  one `expose` per project/socket remains the real boundary. Manual
+  `sudo yukariko …` passes become consistent with the daemon.
+- **Unprivileged daemon + ACLs:** keep the `yukariko` user and let
+  `expose` apply the filesystem ACLs for it — `rwX` (with defaults) on
+  worktrees, `rw` on sockets, traverse on the owning `/home/<user>` or
+  `/run/user/<uid>` tree. `expose` reapplies them on every run, which
+  matters: rootless dockerd recreates its socket on restart and
+  `/run/user` is recreated at login, both dropping ACLs — after a rootless
+  daemon restart, re-run `sudo yukariko expose <socket>`. The installer
+  provisions the `acl` package; manual runs on worktrees as the service
+  user need explicit flags:
+  `sudo -u yukariko yukariko --config /etc/yukariko/yukariko.yaml --data-dir /var/lib/yukariko …`
+  (the flagless defaults are root-only). Root-run passes write root-owned
+  files into the worktree and the store; the store is healed
+  automatically, the worktree is not — prefer one layout consistently.
+
 **Rootless Docker endpoints** need the same treatment: `ProtectHome=yes`
 blocks `/run/user` entirely, so expose the daemon's socket the same way
 (`sudo yukariko expose /run/user/<uid>/docker.sock`) and ensure the socket

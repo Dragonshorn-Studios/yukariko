@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -59,6 +61,11 @@ under /home, /root, or /run/user (rootless Docker sockets) additionally
 set ProtectHome=read-only, since ProtectHome=yes blocks those trees
 entirely and a ReadWritePaths grant alone would stay inert.
 
+expose also applies the matching filesystem ACLs for the unit's user
+(rwX on worktrees, rw on sockets, traverse on the owning /home/<user> or
+/run/user/<uid> tree), reapplied on every run because rootless dockerd
+recreates its socket; skipped when the unit runs as root.
+
 Linux only; requires root - the service user can never grant itself
 filesystem access.`,
 		Args: cobra.MaximumNArgs(1),
@@ -98,12 +105,13 @@ func (a *App) runExpose(cmd *cobra.Command, args []string, unitPath string) erro
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
+	isSocket := fi.Mode()&os.ModeSocket != 0
 	switch {
 	case fi.IsDir():
 		if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
 			return fmt.Errorf("%s is not a git worktree (no .git); pass the project's worktree directory: %w", path, errUsage)
 		}
-	case fi.Mode()&os.ModeSocket != 0:
+	case isSocket:
 		// Rootless Docker sockets; a /run/user target still receives the
 		// ProtectHome relaxation in writeExposeDropIn.
 	default:
@@ -119,6 +127,13 @@ func (a *App) runExpose(cmd *cobra.Command, args []string, unitPath string) erro
 	if !changed {
 		fmt.Fprintf(out, "%s is already exposed in %s\n", path, dropIn)
 	}
+	// Filesystem ACLs for the unit's user — reapplied on every run, because
+	// rootless dockerd recreates its socket (dropping ACLs) and /run/user is
+	// recreated at login. The sandbox grant alone does not cross Unix
+	// ownership.
+	if err := applyACLs(cmd.Context(), out, path, isSocket, unitPath); err != nil {
+		return err
+	}
 	// Always reload: a previous run may have written the drop-in but failed
 	// its reload, and the only healing path back through this command is a
 	// rerun. daemon-reload is idempotent and cheap.
@@ -131,6 +146,107 @@ func (a *App) runExpose(cmd *cobra.Command, args []string, unitPath string) erro
 	fmt.Fprintln(out, "applied; run: sudo systemctl restart yukariko")
 	return nil
 }
+
+// aclAvailable/unitUser/aclRun are the ACL seams; tests stub them.
+var (
+	aclAvailable = func() bool {
+		_, err := exec.LookPath("setfacl")
+		return err == nil
+	}
+	unitUser = func(ctx context.Context, unitName string) (string, error) {
+		res, err := (&runner.Runner{}).Run(ctx, runner.Request{
+			Name:    "systemctl show " + unitName,
+			Argv:    []string{"systemctl", "show", unitName, "--value", "-p", "User"},
+			Timeout: 15 * time.Second,
+		})
+		if err != nil {
+			return "", err
+		}
+		if res.Status != runner.StatusSuccess {
+			return "", fmt.Errorf("systemctl show %s %s: %s", unitName, res.Status, orACLDetail(res))
+		}
+		return strings.TrimSpace(string(res.Stdout)), nil
+	}
+	aclRun = func(ctx context.Context, argv []string) error {
+		res, err := (&runner.Runner{}).Run(ctx, runner.Request{
+			Name:    "setfacl",
+			Argv:    argv,
+			Timeout: time.Minute,
+		})
+		if err != nil {
+			return err
+		}
+		if res.Status != runner.StatusSuccess {
+			return fmt.Errorf("setfacl %s: %s", strings.Join(argv[2:], " "), orACLDetail(res))
+		}
+		return nil
+	}
+)
+
+func orACLDetail(res runner.Result) string {
+	if s := strings.TrimSpace(string(res.Stderr)); s != "" {
+		return s
+	}
+	return res.Err
+}
+
+// applyACLs grants the unit's user the Unix permissions the sandbox grant
+// cannot provide: rwX (+defaults) on a worktree, rw on a socket, and
+// traverse on the owning /home/<user> or /run/user/<uid> parent. A unit
+// running as root needs none of this. Best effort per command, with the
+// overall failure text actionable.
+func applyACLs(ctx context.Context, out io.Writer, target string, isSocket bool, unitPath string) error {
+	if !aclAvailable() {
+		return errors.New("setfacl not found; install the acl package (rerunning scripts/install.sh does it) so expose can grant the daemon user filesystem access")
+	}
+	user, err := unitUser(ctx, filepath.Base(unitPath))
+	if err != nil || user == "" {
+		user = defaultServiceUser // the shipped unit's user; best effort
+		fmt.Fprintf(out, "note: could not resolve the unit's User= (%v); assuming %s\n", err, user)
+	}
+	if user == "root" {
+		fmt.Fprintln(out, "unit runs as root; no filesystem ACLs needed")
+		return nil
+	}
+	for _, argv := range aclCommands(target, isSocket, user) {
+		if err := aclRun(ctx, argv); err != nil {
+			return fmt.Errorf("%v (granting %s access to %s): %w", argv, user, target, err)
+		}
+	}
+	return nil
+}
+
+// aclCommands builds the setfacl invocations for one target: traverse on
+// the owning user-tree parent, then the target grant itself.
+func aclCommands(target string, isSocket bool, user string) [][]string {
+	var cmds [][]string
+	if parent := owningUserTree(target); parent != "" {
+		cmds = append(cmds, []string{"setfacl", "-m", "u:" + user + ":x", parent})
+	}
+	if isSocket {
+		cmds = append(cmds, []string{"setfacl", "-m", "u:" + user + ":rw", target})
+	} else {
+		cmds = append(cmds, []string{"setfacl", "-R", "-m", "u:" + user + ":rwX", "-m", "d:u:" + user + ":rwX", target})
+	}
+	return cmds
+}
+
+// owningUserTree returns the /home/<user> or /run/user/<uid> prefix the
+// target lives under, or "" for system trees like /srv.
+func owningUserTree(target string) string {
+	for _, prefix := range []string{"/home/", "/run/user/"} {
+		if !strings.HasPrefix(target, prefix) {
+			continue
+		}
+		rest := strings.TrimPrefix(target, prefix)
+		if seg := strings.Split(rest, "/"); seg[0] != "" {
+			return prefix + seg[0]
+		}
+	}
+	return ""
+}
+
+const defaultServiceUser = "yukariko"
 
 // protectHomeBlocks reports whether the path lives in a tree the unit's
 // ProtectHome=yes makes inaccessible (/home, /root, /run/user). A

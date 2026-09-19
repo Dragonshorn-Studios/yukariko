@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -175,6 +176,10 @@ func TestRunExpose(t *testing.T) {
 		origReload := daemonReload
 		t.Cleanup(func() { daemonReload = origReload })
 		daemonReload = func(context.Context) error { reloads++; return nil }
+		origAvail, origUser := aclAvailable, unitUser
+		t.Cleanup(func() { aclAvailable, unitUser = origAvail, origUser })
+		aclAvailable = func() bool { return true }
+		unitUser = func(context.Context, string) (string, error) { return "root", nil } // no ACLs here
 
 		unit := filepath.Join(t.TempDir(), "yukariko.service")
 		if err := os.WriteFile(unit, []byte("[Unit]\nDescription=test\n"), 0o644); err != nil {
@@ -245,6 +250,10 @@ func TestRunExpose(t *testing.T) {
 		origReload := daemonReload
 		t.Cleanup(func() { daemonReload = origReload })
 		daemonReload = func(context.Context) error { return errors.New("systemctl daemon-reload failed: no bus") }
+		origAvail, origUser := aclAvailable, unitUser
+		t.Cleanup(func() { aclAvailable, unitUser = origAvail, origUser })
+		aclAvailable = func() bool { return true }
+		unitUser = func(context.Context, string) (string, error) { return "root", nil }
 
 		unit := filepath.Join(t.TempDir(), "yukariko.service")
 		if err := os.WriteFile(unit, []byte("[Unit]\n"), 0o644); err != nil {
@@ -277,6 +286,96 @@ func TestRunExpose(t *testing.T) {
 		err := app.Execute(context.Background(), []string{"expose", "--unit", unit, t.TempDir()}, io.Discard, io.Discard)
 		if err == nil || !strings.Contains(err.Error(), "git worktree") {
 			t.Fatalf("err = %v, want a git-worktree usage error", err)
+		}
+	})
+}
+
+func TestACLCommands(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		target   string
+		isSocket bool
+		want     [][]string
+	}{
+		{
+			name:   "home worktree grants traverse then rwX with defaults",
+			target: "/home/u/.maomao",
+			want: [][]string{
+				{"setfacl", "-m", "u:srv:x", "/home/u"},
+				{"setfacl", "-R", "-m", "u:srv:rwX", "-m", "d:u:srv:rwX", "/home/u/.maomao"},
+			},
+		},
+		{
+			name:     "rootless socket grants traverse then rw",
+			target:   "/run/user/1000/docker.sock",
+			isSocket: true,
+			want: [][]string{
+				{"setfacl", "-m", "u:srv:x", "/run/user/1000"},
+				{"setfacl", "-m", "u:srv:rw", "/run/user/1000/docker.sock"},
+			},
+		},
+		{
+			name:   "system tree needs no traverse grant",
+			target: "/srv/proj",
+			want: [][]string{
+				{"setfacl", "-R", "-m", "u:srv:rwX", "-m", "d:u:srv:rwX", "/srv/proj"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := aclCommands(tc.target, tc.isSocket, "srv")
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("commands = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyACLs(t *testing.T) {
+	setSeams := func(t *testing.T, user string, avail bool) *[][]string {
+		t.Helper()
+		var calls *[][]string = &[][]string{}
+		origAvail, origUser, origRun := aclAvailable, unitUser, aclRun
+		t.Cleanup(func() { aclAvailable, unitUser, aclRun = origAvail, origUser, origRun })
+		aclAvailable = func() bool { return avail }
+		unitUser = func(context.Context, string) (string, error) { return user, nil }
+		record := make([][]string, 0, 2)
+		calls = &record
+		aclRun = func(_ context.Context, argv []string) error {
+			record = append(record, argv)
+			return nil
+		}
+		return calls
+	}
+
+	t.Run("grants for the unit user", func(t *testing.T) {
+		calls := setSeams(t, "yukariko", true)
+		if err := applyACLs(context.Background(), io.Discard, "/run/user/1000/docker.sock", true, "/etc/systemd/system/yukariko.service"); err != nil {
+			t.Fatal(err)
+		}
+		if len(*calls) != 2 || (*calls)[0][3] != "/run/user/1000" {
+			t.Fatalf("calls = %+v", *calls)
+		}
+	})
+
+	t.Run("root unit needs no ACLs", func(t *testing.T) {
+		calls := setSeams(t, "root", true)
+		if err := applyACLs(context.Background(), io.Discard, "/srv/proj", false, "/etc/systemd/system/yukariko.service"); err != nil {
+			t.Fatal(err)
+		}
+		if len(*calls) != 0 {
+			t.Fatalf("root unit ran ACLs: %+v", *calls)
+		}
+	})
+
+	t.Run("missing setfacl is actionable", func(t *testing.T) {
+		setSeams(t, "yukariko", false)
+		err := applyACLs(context.Background(), io.Discard, "/srv/proj", false, "/etc/systemd/system/yukariko.service")
+		if err == nil || !strings.Contains(err.Error(), "install.sh") {
+			t.Fatalf("err = %v, want the installer pointer", err)
 		}
 	})
 }

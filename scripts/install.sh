@@ -193,6 +193,26 @@ else
   note "(docker group membership is root-equivalent privilege - docs/docker-access.md)"
 fi
 
+# Filesystem ACLs let an unprivileged daemon user reach other users'
+# worktrees and rootless sockets; yukariko expose applies them and needs
+# setfacl. Install the acl package when the tool is missing.
+if ! command -v setfacl >/dev/null 2>&1; then
+  ACL_NOTE="yukariko expose will ask for the acl package"
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q acl >/dev/null 2>&1 && note "installed the acl package (setfacl)" || note "could not install acl via apt-get; ${ACL_NOTE}"
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q acl >/dev/null 2>&1 && note "installed the acl package (setfacl)" || note "could not install acl via dnf; ${ACL_NOTE}"
+  elif command -v apk >/dev/null 2>&1; then
+    apk add acl >/dev/null 2>&1 && note "installed the acl package (setfacl)" || note "could not install acl via apk; ${ACL_NOTE}"
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -S --noconfirm acl >/dev/null 2>&1 && note "installed the acl package (setfacl)" || note "could not install acl via pacman; ${ACL_NOTE}"
+  elif command -v zypper >/dev/null 2>&1; then
+    zypper --non-interactive install acl >/dev/null 2>&1 && note "installed the acl package (setfacl)" || note "could not install acl via zypper; ${ACL_NOTE}"
+  else
+    note "setfacl missing and no supported package manager found; ${ACL_NOTE}"
+  fi
+fi
+
 # systemd unit from the release assets, checksum-verified like the binary.
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
   if curl -fsSL -o "${TMP}/yukariko.service" "${DL}/${VERSION}/yukariko.service"; then

@@ -3,8 +3,8 @@ package git
 import (
 	"context"
 
-	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"errors"
+	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"os"
 	"os/exec"
 	"path/filepath"
