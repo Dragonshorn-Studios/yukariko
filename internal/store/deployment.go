@@ -96,6 +96,22 @@ func (s *Store) ReapStaleDeployments(ctx context.Context, maxAge time.Duration, 
 	return int(n), nil
 }
 
+// ReleaseRunningDeployment deletes a running deployment row. Restart uses
+// this to hold the unique-index lock without leaving a deployment record
+// or advancing the checkpoint. It is a no-op when the row is already gone.
+func (s *Store) ReleaseRunningDeployment(ctx context.Context, deploymentID string) error {
+	if deploymentID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM deployments WHERE id = ? AND status = ?`,
+		deploymentID, StatusRunning)
+	if err != nil {
+		return fmt.Errorf("release running deployment: %w", err)
+	}
+	return nil
+}
+
 // FinishDeployment moves a running deployment to failed or interrupted. It
 // never touches the deployed version: only CommitDeploymentSuccess can
 // advance it.

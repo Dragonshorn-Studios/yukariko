@@ -179,6 +179,15 @@ queue.
   `update --dry-run` to re-check.
 - **Leftover temp files** in the data directory from a crashed write are
   removed automatically on the next run.
+- **Bounce a stuck app**: `yukariko restart --app <id>` runs
+  `docker compose … restart` with the exact configured project context
+  (`-f`, env files, profiles, `-p`, workdir) or `docker restart <name>`
+  for a standalone container, honoring the app's `docker:` endpoint. It
+  takes the same per-app lock as `update`, so a concurrent deploy is
+  refused with a clear message. The deployed SHA/digest is not advanced.
+  Health probes never restart containers on their own; this command is
+  the operator's explicit bounce. There is no `--all`, no remote restart,
+  and no HTTP/dashboard button.
 
 ## Scope freeze (non-goals)
 

@@ -705,6 +705,27 @@ func TestTriggerUnknownApp(t *testing.T) {
 	}
 }
 
+func TestHoldAppLockUnknownAndBusy(t *testing.T) {
+	t.Parallel()
+	s := newTestScheduler(Options{
+		Apps:          []*config.App{testApp("a", time.Hour)},
+		Clock:         newFakeClock(startTime),
+		ManualTimeout: 20 * time.Millisecond,
+	})
+	if _, err := s.HoldAppLock(context.Background(), "nope"); err == nil || !strings.Contains(err.Error(), "unknown app") {
+		t.Fatalf("err = %v, want unknown app", err)
+	}
+	release, err := s.HoldAppLock(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	_, err = s.HoldAppLock(context.Background(), "a")
+	if err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("err = %v, want busy", err)
+	}
+}
+
 func TestReloadRerunsPreflightAndSwapsApps(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock(startTime)

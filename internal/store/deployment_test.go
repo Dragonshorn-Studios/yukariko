@@ -82,3 +82,33 @@ func TestReapStaleDeployments(t *testing.T) {
 		t.Fatalf("fresh row %s was reaped", fresh)
 	}
 }
+
+// Restart borrows a running row as a lock token and deletes it afterwards
+// so the bounce is not a deployment record.
+func TestReleaseRunningDeployment(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := openStore(t)
+	now := time.Now()
+	id, err := s.BeginDeployment(ctx, BeginDeploymentParams{AppID: "app", Cause: "restart", At: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReleaseRunningDeployment(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.OpenDeployment(ctx, "app"); ok {
+		t.Fatal("released row still open")
+	}
+	deps, err := s.RecentDeployments(ctx, "app", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deps) != 0 {
+		t.Fatalf("deployments = %+v, want none after a restart lock release", deps)
+	}
+	// A subsequent deploy can claim the unique index.
+	if _, err := s.BeginDeployment(ctx, BeginDeploymentParams{AppID: "app", Cause: "manual", At: now.Add(time.Second)}); err != nil {
+		t.Fatalf("begin after release = %v", err)
+	}
+}

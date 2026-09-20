@@ -12,12 +12,15 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/daemon"
+	"github.com/Dragonshorn-Studios/yukariko/internal/exitcode"
 	"github.com/Dragonshorn-Studios/yukariko/internal/registry"
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
 	"github.com/Dragonshorn-Studios/yukariko/internal/state"
+	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 )
 
 const e2eDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -207,6 +210,144 @@ func TestUpdateDryRunNeverDeploys(t *testing.T) {
 	}
 	if recorder.count() != 0 {
 		t.Errorf("dry-run executed %d deploy commands", recorder.count())
+	}
+}
+
+func TestRestartEndToEndDoesNotAdvanceCheckpoint(t *testing.T) {
+	t.Parallel()
+	app, recorder, path := e2eCLI(t, e2eConfig)
+	dataDir := filepath.Join(filepath.Dir(path), "data")
+
+	if err := app.Execute(context.Background(),
+		[]string{"update", "--config", path, "--data-dir", dataDir, "--app", "web"}, &strings.Builder{}, &strings.Builder{}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	stdout := &strings.Builder{}
+	if err := app.Execute(context.Background(),
+		[]string{"status", "--config", path, "--data-dir", dataDir, "--json"}, stdout, &strings.Builder{}); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	var before []state.AppStatus
+	if err := json.Unmarshal([]byte(stdout.String()), &before); err != nil {
+		t.Fatalf("status json: %v", err)
+	}
+	if len(before) != 1 || before[0].Deployed == "" {
+		t.Fatalf("status before restart = %+v", before)
+	}
+	deployed := before[0].Deployed
+	cmdCount := recorder.count()
+
+	out := &strings.Builder{}
+	if err := app.Execute(context.Background(),
+		[]string{"restart", "--config", path, "--data-dir", dataDir, "--app", "web"}, out, &strings.Builder{}); err != nil {
+		t.Fatalf("restart: %v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "restarted") {
+		t.Errorf("restart output missing confirmation:\n%s", out)
+	}
+	if recorder.count() != cmdCount+1 {
+		t.Fatalf("restart issued %d commands after %d deploy commands, want exactly one bounce", recorder.count(), cmdCount)
+	}
+	joined := strings.Join(recorderArgvs(recorder), "\n")
+	if !strings.Contains(joined, "compose") || !strings.HasSuffix(strings.TrimSpace(recorderArgvs(recorder)[len(recorderArgvs(recorder))-1]), "restart") {
+		t.Errorf("last command was not compose restart:\n%s", joined)
+	}
+
+	stdout2 := &strings.Builder{}
+	if err := app.Execute(context.Background(),
+		[]string{"status", "--config", path, "--data-dir", dataDir, "--json"}, stdout2, &strings.Builder{}); err != nil {
+		t.Fatalf("status after restart: %v", err)
+	}
+	var after []state.AppStatus
+	if err := json.Unmarshal([]byte(stdout2.String()), &after); err != nil {
+		t.Fatalf("status json: %v", err)
+	}
+	if len(after) != 1 || after[0].Deployed != deployed {
+		t.Fatalf("checkpoint moved: before %+v after %+v", before, after)
+	}
+
+	logs := &strings.Builder{}
+	if err := app.Execute(context.Background(),
+		[]string{"logs", "--config", path, "--data-dir", dataDir, "--app", "web", "--limit", "20"}, logs, &strings.Builder{}); err != nil {
+		t.Fatalf("logs: %v", err)
+	}
+	if !strings.Contains(logs.String(), "restart") || !strings.Contains(logs.String(), "succeeded") {
+		t.Errorf("logs missing restart success:\n%s", logs)
+	}
+}
+
+func TestRestartStandaloneArgvAndUnknownApp(t *testing.T) {
+	t.Parallel()
+	standalone := `schema_version: 1
+apps:
+  - id: box
+    source:
+      mode: registry
+      registry:
+        images:
+          - ref: REG_HOST/app:1
+    deploy:
+      mode: standalone
+      standalone:
+        image: REG_HOST/app:1
+        name: box-1
+    docker:
+      context: rootless
+`
+	app, recorder, path := e2eCLI(t, standalone)
+	dataDir := filepath.Join(filepath.Dir(path), "data")
+
+	out := &strings.Builder{}
+	if err := app.Execute(context.Background(),
+		[]string{"restart", "--config", path, "--data-dir", dataDir, "--app", "box"}, out, &strings.Builder{}); err != nil {
+		t.Fatalf("restart: %v\n%s", err, out)
+	}
+	joined := strings.Join(recorderArgvs(recorder), "\n")
+	if joined != "docker --context rootless restart box-1" {
+		t.Fatalf("argv = %q, want standalone restart with endpoint flags", joined)
+	}
+
+	err := app.Execute(context.Background(),
+		[]string{"restart", "--config", path, "--data-dir", dataDir, "--app", "missing"}, &strings.Builder{}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "no app") || Code(err) != exitcode.Usage {
+		t.Fatalf("err = %v code %d, want unknown-app usage", err, Code(err))
+	}
+
+	err = app.Execute(context.Background(),
+		[]string{"restart", "--config", path, "--data-dir", dataDir}, &strings.Builder{}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "--app") {
+		t.Fatalf("err = %v, want required --app", err)
+	}
+}
+
+func TestRestartRefusesInProgressDeploy(t *testing.T) {
+	t.Parallel()
+	app, recorder, path := e2eCLI(t, e2eConfig)
+	dataDir := filepath.Join(filepath.Dir(path), "data")
+	// Prime the store so the unique-index lock is held as if the daemon
+	// were mid-deploy, then restart must refuse without calling docker.
+	if err := app.Execute(context.Background(),
+		[]string{"status", "--config", path, "--data-dir", dataDir}, &strings.Builder{}, &strings.Builder{}); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	st, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.BeginDeployment(context.Background(), store.BeginDeploymentParams{
+		AppID: "web", Cause: "scheduled", At: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err = app.Execute(context.Background(),
+		[]string{"restart", "--config", path, "--data-dir", dataDir, "--app", "web"}, &strings.Builder{}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "already in progress") {
+		t.Fatalf("err = %v, want the lock conflict", err)
+	}
+	if recorder.count() != 0 {
+		t.Fatalf("restart issued %d docker commands while a deploy was running", recorder.count())
 	}
 }
 
