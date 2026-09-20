@@ -290,8 +290,13 @@ func TestBackoffBoundsAndReset(t *testing.T) {
 	<-s.Ready()
 
 	// First pass at the interval: it fails and schedules backoff.
+	// fail() records StateFailed then immediately chains to backoff; wait
+	// for backoff so we never sample the in-between failed state.
 	clock.Advance(10 * time.Minute)
-	waitFor(t, 2*time.Second, "failure pass 1", func() bool { return checker.calls("a") == 1 })
+	waitFor(t, 2*time.Second, "failure pass 1", func() bool {
+		st, _ := s.Status("a")
+		return checker.calls("a") == 1 && st.State == StateBackoff && st.Failures == 1
+	})
 	st, _ := s.Status("a")
 	if st.State != StateBackoff || st.Failures != 1 {
 		t.Fatalf("after pass 1: state %q failures %d", st.State, st.Failures)
@@ -313,7 +318,8 @@ func TestBackoffBoundsAndReset(t *testing.T) {
 		clock.Advance(step.advance)
 		want := lastCount + 1
 		waitFor(t, 2*time.Second, fmt.Sprintf("failure pass %d", want), func() bool {
-			return checker.calls("a") >= want
+			st, _ := s.Status("a")
+			return checker.calls("a") >= want && st.State == StateBackoff
 		})
 		st, _ := s.Status("a")
 		if st.State != StateBackoff {
