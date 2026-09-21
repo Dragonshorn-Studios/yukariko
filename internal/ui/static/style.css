@@ -140,7 +140,7 @@ h2 {
   flex-direction: column;
   gap: 0.75rem;
 }
-.app-card, .panel, .empty-card {
+.app-card, .panel, .empty-card, .chronicle-panel {
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -238,6 +238,7 @@ h2 {
 /* Chronicle side panel / event list */
 .chronicle-panel {
   padding: 1.05rem 1.15rem 0.85rem;
+  overflow: auto;
 }
 .chronicle-panel h2 {
   margin: 0 0 0.85rem;

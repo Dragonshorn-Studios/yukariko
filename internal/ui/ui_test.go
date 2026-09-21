@@ -243,7 +243,7 @@ func TestLightLapisLock(t *testing.T) {
 		"Observe · Divine · Bless",
 		`class="mark"`,
 		`class="app-card"`,
-		`class="chronicle-panel`,
+		`class="chronicle-panel"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("status page missing %q", want)
