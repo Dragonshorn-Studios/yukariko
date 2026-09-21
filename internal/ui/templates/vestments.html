@@ -12,7 +12,7 @@ deployed — and whether the two disagree.</p>
   <td>{{.Image}}</td>
   <td>{{.Observed}}</td>
   <td>{{.Deployed}}</td>
-  <td>{{if .Pending}}<span class="badge warn">Pending update</span>{{else if .Note}}{{.Note}}{{else}}<span class="badge synced">Synced</span>{{end}}</td>
+  <td>{{if .Updating}}<span class="badge updating">Updating</span>{{else if .Pending}}<span class="badge warn">Pending update</span>{{else if .Note}}{{.Note}}{{else}}<span class="badge synced">Synced</span>{{end}}</td>
 </tr>
 {{else}}
 <tr><td colspan="5">No applications configured.</td></tr>

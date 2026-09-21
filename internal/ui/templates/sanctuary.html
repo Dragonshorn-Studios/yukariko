@@ -6,7 +6,7 @@
     <ul class="app-list">
     {{range .Data.rows}}
       <li>
-        <article class="app-card">
+        <article class="app-card{{if .Updating}} is-updating{{end}}"{{if .Updating}} aria-busy="true"{{end}}>
           <div>
             <h2 class="app-name">{{.Name}}</h2>
             <p class="app-meta">{{.Meta}}</p>

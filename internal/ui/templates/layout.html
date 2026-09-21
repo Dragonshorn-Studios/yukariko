@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Yukariko · {{.Title}}</title>
+{{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
 <link rel="stylesheet" href="/ui/static/style.css">
 </head>
 <body>
@@ -31,7 +32,7 @@
   <p class="tagline">Observe · Divine · Bless</p>
   <p>Yukariko observes and records; Docker, Compose, and Git stay the source of truth.
      No control exists on these pages.</p>
-  <p>Generated {{.Now}}</p>
+  <p>Generated {{.Now}} · live · every {{.Refresh}}s</p>
 </footer>
 </div>
 </body>

@@ -172,6 +172,9 @@ h2 {
   color: var(--stale);
 }
 .app-facts .label { font-weight: 500; }
+.app-card.is-updating {
+  box-shadow: 0 0 0 1px var(--mirage), var(--shadow);
+}
 .app-card-status {
   flex-shrink: 0;
   display: flex;
@@ -233,6 +236,22 @@ h2 {
   color: var(--stale);
   border-style: dashed;
   background: var(--surface);
+}
+.badge.updating {
+  color: var(--lapis);
+  border-color: var(--mirage);
+  background: #F3F7FC;
+}
+.badge.updating::before {
+  width: 0.55rem;
+  height: 0.55rem;
+  border: 1.5px solid var(--mirage);
+  border-top-color: var(--lapis);
+  background: transparent;
+  animation: yukariko-spin 0.8s linear infinite;
+}
+@keyframes yukariko-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Chronicle side panel / event list */
@@ -419,4 +438,8 @@ footer p { margin: 0.25rem 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+  .badge.updating::before {
+    border: none;
+    background: var(--lapis);
+  }
 }

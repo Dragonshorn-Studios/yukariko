@@ -213,6 +213,8 @@ func TestLightLapisLock(t *testing.T) {
 		"--fail: #9E3B3B",
 		"--stale:",
 		"prefers-reduced-motion",
+		"yukariko-spin",
+		".badge.updating",
 	} {
 		if !strings.Contains(text, tok) {
 			t.Errorf("style.css missing locked token %q", tok)
@@ -244,6 +246,7 @@ func TestLightLapisLock(t *testing.T) {
 		`class="mark"`,
 		`class="app-card"`,
 		`class="chronicle-panel"`,
+		`http-equiv="refresh"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("status page missing %q", want)
@@ -268,5 +271,50 @@ func TestAssetInventoryDocumented(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join("..", "..", "docs", "ASSETS.md")); err != nil {
 		t.Error("docs/ASSETS.md must exist and inventory the assets")
+	}
+}
+
+func TestUpdatingChipAndLiveRefresh(t *testing.T) {
+	t.Parallel()
+	s, srv := uiServer(t, time.Now())
+	idle := func(path string) string {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s Cache-Control = %q, want no-store", path, resp.Header.Get("Cache-Control"))
+		}
+		return readAll(resp)
+	}
+	if !strings.Contains(idle("/ui"), `http-equiv="refresh" content="12"`) {
+		t.Error("idle status page should refresh every 12s")
+	}
+	if _, err := s.Store.BeginDeployment(context.Background(), store.BeginDeploymentParams{
+		AppID: "web", Cause: "manual", At: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := idle("/ui")
+	for _, want := range []string{
+		"Updating",
+		`class="badge updating"`,
+		`is-updating`,
+		`aria-busy="true"`,
+		`http-equiv="refresh" content="5"`,
+	} {
+		if !strings.Contains(status, want) {
+			t.Errorf("in-progress status missing %q", want)
+		}
+	}
+	if strings.Contains(status, `content="12"`) {
+		t.Error("in-progress refresh should be 5s, not idle 12s")
+	}
+	if !strings.Contains(idle("/ui/vestments"), `class="badge updating"`) {
+		t.Error("versions should mark the in-progress app as Updating")
+	}
+	if !strings.Contains(idle("/ui/chronicle"), "Updating") {
+		t.Error("logs should mark a running deployment as Updating")
 	}
 }

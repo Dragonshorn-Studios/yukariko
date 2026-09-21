@@ -6,7 +6,9 @@
 //
 // There are no state-changing controls, no forms, and no JavaScript: every
 // page renders from the same read-only query layer the CLI and API use,
-// and the only interactive element is plain links.
+// and the only interactive element is plain links. Pages auto-refresh via
+// a meta refresh so a pass in flight is visible; the Updating chip uses a
+// CSS spinner (static under prefers-reduced-motion).
 //
 // All assets are original to this project (see docs/ASSETS.md): the
 // light lapis lock — canvas, surface, ink, lapis, mirage, rose-gold,
@@ -68,7 +70,13 @@ type page struct {
 	Data     any
 	Now      string
 	HostName string
+	Refresh  int // meta-refresh seconds; always set so the view stays live
 }
+
+const (
+	refreshIdleSeconds = 12
+	refreshBusySeconds = 5
+)
 
 type navLink struct {
 	Href, Label, Section string
@@ -105,6 +113,7 @@ func (s *Server) page(section string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
 		data := s.data(req, section)
 		if err := tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
 			// Headers may already be written; log-free minimal fallback.
@@ -120,6 +129,7 @@ func (s *Server) data(req *http.Request, section string) page {
 		Section: section,
 		Nav:     nav,
 		Now:     s.now().UTC().Format(time.RFC3339),
+		Refresh: refreshIdleSeconds,
 	}
 	switch section {
 	case "sanctuary":
@@ -131,7 +141,22 @@ func (s *Server) data(req *http.Request, section string) page {
 	case "divination":
 		p.Data = s.divination(req)
 	}
+	if s.anyOpenDeployment(req.Context()) {
+		p.Refresh = refreshBusySeconds
+	}
 	return p
+}
+
+func (s *Server) anyOpenDeployment(ctx context.Context) bool {
+	if s.Store == nil || s.Config == nil {
+		return false
+	}
+	for i := range s.Config.Apps {
+		if _, ok, err := s.Store.OpenDeployment(ctx, s.Config.Apps[i].ID); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 // sanctuaryRow is one overview card: running/health/update/deployment stay
@@ -148,6 +173,7 @@ type sanctuaryRow struct {
 	BadUpdate string
 	BadHealth string
 	BadDeploy string
+	Updating  bool
 }
 
 func (s *Server) sanctuary(req *http.Request) any {
@@ -196,6 +222,12 @@ func (s *Server) sanctuary(req *http.Request) any {
 			r.Health = orDashText(r.Health)
 		}
 		r.Running = runningText(row)
+		if _, open, err := s.Store.OpenDeployment(ctx, app.ID); err == nil && open {
+			r.Updating = true
+			r.Update, r.BadUpdate = "Updating", "updating"
+			r.Deploy, r.BadDeploy = "in progress", "updating"
+			r.Running = "updating"
+		}
 		rows = append(rows, r)
 	}
 	events, _ := state.EventsFor(ctx, s.Store, "", "", 8, 0)
@@ -312,6 +344,7 @@ type vestmentRow struct {
 	Deployed string
 	Pending  bool
 	Note     string
+	Updating bool
 }
 
 func (s *Server) vestments(req *http.Request) any {
@@ -331,6 +364,7 @@ func (s *Server) vestments(req *http.Request) any {
 		if len(images) == 0 {
 			images = append(images, "git worktree: "+orDashText(app.Source.Git.Dir))
 		}
+		_, open, _ := s.Store.OpenDeployment(ctx, app.ID)
 		rows = append(rows, vestmentRow{
 			App:      app.ID,
 			Image:    strings.Join(images, ", "),
@@ -338,6 +372,7 @@ func (s *Server) vestments(req *http.Request) any {
 			Deployed: orDashOK(short(deployed), depOK),
 			Pending:  obsOK && depOK && observed != deployed,
 			Note:     pendingNote(obsOK, depOK),
+			Updating: open,
 		})
 	}
 	return map[string]any{"rows": rows}

@@ -29,7 +29,7 @@
   <thead><tr><th scope="col">App</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Detail</th></tr></thead>
   <tbody>
   {{range .Data.deployments}}
-  <tr><th scope="row">{{.AppID}}</th><td><span class="badge {{if eq .Status "failed"}}fail{{else}}synced{{end}}">{{.Status}}</span></td><td>{{.StartedAt.Format "2006-01-02 15:04:05"}}</td><td>{{.Error}}</td></tr>
+  <tr><th scope="row">{{.AppID}}</th><td>{{if eq .Status "running"}}<span class="badge updating">Updating</span>{{else if eq .Status "failed"}}<span class="badge fail">{{.Status}}</span>{{else}}<span class="badge synced">{{.Status}}</span>{{end}}</td><td>{{.StartedAt.Format "2006-01-02 15:04:05"}}</td><td>{{.Error}}</td></tr>
   {{else}}
   <tr><td colspan="4">No deployments recorded.</td></tr>
   {{end}}
