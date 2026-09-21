@@ -366,7 +366,7 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 	if app.Source.Mode == config.SourceGit {
 		kind = store.KindGitSHA
 	}
-	depID, err := d.claimDeployment(ctx, app)
+	depID, err := d.claimDeploymentCause(ctx, app, "update")
 	if err != nil {
 		return schedule.DeployResult{}, err
 	}
@@ -433,10 +433,16 @@ func deploymentBudget(app *config.App) time.Duration {
 // CLI) holds a fresh row, this pass bails with a clear message; when the
 // row is older than any live pass could be, the owning process is gone
 // and the row is reaped so one crash cannot block the app forever.
-func (d *DeployDispatcher) claimDeployment(ctx context.Context, app *config.App) (string, error) {
-	depID, err := d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
-		AppID: app.ID, Cause: "update", At: time.Now(),
-	})
+func (d *DeployDispatcher) claimDeploymentCause(ctx context.Context, app *config.App, cause string) (string, error) {
+	if cause == "" {
+		cause = "update"
+	}
+	begin := func() (string, error) {
+		return d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
+			AppID: app.ID, Cause: cause, At: time.Now(),
+		})
+	}
+	depID, err := begin()
 	if err == nil || !errors.Is(err, store.ErrDeploymentInProgress) {
 		return depID, err
 	}
@@ -446,9 +452,7 @@ func (d *DeployDispatcher) claimDeployment(ctx context.Context, app *config.App)
 	}
 	if !ok {
 		// The row vanished between insert and read; retry the claim once.
-		return d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
-			AppID: app.ID, Cause: "update", At: time.Now(),
-		})
+		return begin()
 	}
 	age := time.Since(open.StartedAt)
 	if age > deploymentBudget(app) {
@@ -456,9 +460,7 @@ func (d *DeployDispatcher) claimDeployment(ctx context.Context, app *config.App)
 			fmt.Sprintf("stale: pass ran %s, past its budget; the owning process is gone", age.Round(time.Second)), time.Now()); ferr != nil {
 			return "", ferr
 		}
-		return d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
-			AppID: app.ID, Cause: "update", At: time.Now(),
-		})
+		return begin()
 	}
 	return "", fmt.Errorf("deployment already in progress for %s (started %s ago, cause %q) - not starting a second pass; retry after it finishes",
 		app.ID, age.Round(time.Second), open.Cause)

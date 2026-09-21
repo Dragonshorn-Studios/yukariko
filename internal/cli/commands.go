@@ -276,6 +276,55 @@ every configured app.`,
 	return cmd
 }
 
+// --- restart ----------------------------------------------------------------
+
+func (a *App) newRestartCommand() *cobra.Command {
+	var appID string
+	cmd := &cobra.Command{
+		Use:   "restart",
+		Short: "Restart one app's containers without deploying or advancing the checkpoint",
+		Long: `Restart bounces a configured app's containers in place: docker compose
+restart with the exact configured project context, or docker restart for a
+standalone container. It takes the same per-app lock as update so it cannot
+overlap a concurrent deploy, records success and failure in the store, and
+never advances the deployed SHA/digest. There is no --all, no health-triggered
+restart, and no HTTP/dashboard mutation.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if appID == "" {
+				return fmt.Errorf("--app <id> is required: %w", errUsage)
+			}
+			opts, err := a.daemonOptions()
+			if err != nil {
+				return err
+			}
+			asm, err := daemon.Assemble(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			defer asm.Store.Close()
+
+			var found bool
+			for _, app := range appsSlice(asm.Config) {
+				if app.ID == appID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("no app %q in the configuration: %w", appID, errUsage)
+			}
+			if err := asm.Restart(cmd.Context(), appID); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%-16s restarted\n", appID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&appID, "app", "", "restart this app (required)")
+	return cmd
+}
+
 // updateDryRun checks the source and runs preflight without any mutation.
 func updateDryRun(cmd *cobra.Command, asm *daemon.Assembled, app *config.App) error {
 	res, err := asm.Checker.Check(cmd.Context(), app)

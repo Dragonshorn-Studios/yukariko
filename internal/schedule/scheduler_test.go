@@ -290,8 +290,13 @@ func TestBackoffBoundsAndReset(t *testing.T) {
 	<-s.Ready()
 
 	// First pass at the interval: it fails and schedules backoff.
+	// fail() records StateFailed then immediately chains to backoff; wait
+	// for backoff so we never sample the in-between failed state.
 	clock.Advance(10 * time.Minute)
-	waitFor(t, 2*time.Second, "failure pass 1", func() bool { return checker.calls("a") == 1 })
+	waitFor(t, 2*time.Second, "failure pass 1", func() bool {
+		st, _ := s.Status("a")
+		return checker.calls("a") == 1 && st.State == StateBackoff && st.Failures == 1
+	})
 	st, _ := s.Status("a")
 	if st.State != StateBackoff || st.Failures != 1 {
 		t.Fatalf("after pass 1: state %q failures %d", st.State, st.Failures)
@@ -313,7 +318,8 @@ func TestBackoffBoundsAndReset(t *testing.T) {
 		clock.Advance(step.advance)
 		want := lastCount + 1
 		waitFor(t, 2*time.Second, fmt.Sprintf("failure pass %d", want), func() bool {
-			return checker.calls("a") >= want
+			st, _ := s.Status("a")
+			return checker.calls("a") >= want && st.State == StateBackoff
 		})
 		st, _ := s.Status("a")
 		if st.State != StateBackoff {
@@ -702,6 +708,27 @@ func TestTriggerUnknownApp(t *testing.T) {
 	s := newTestScheduler(Options{Apps: []*config.App{testApp("a", time.Hour)}, Clock: newFakeClock(startTime)})
 	if err := s.Trigger(context.Background(), "nope"); err == nil {
 		t.Fatal("expected error for unknown app")
+	}
+}
+
+func TestHoldAppLockUnknownAndBusy(t *testing.T) {
+	t.Parallel()
+	s := newTestScheduler(Options{
+		Apps:          []*config.App{testApp("a", time.Hour)},
+		Clock:         newFakeClock(startTime),
+		ManualTimeout: 20 * time.Millisecond,
+	})
+	if _, err := s.HoldAppLock(context.Background(), "nope"); err == nil || !strings.Contains(err.Error(), "unknown app") {
+		t.Fatalf("err = %v, want unknown app", err)
+	}
+	release, err := s.HoldAppLock(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	_, err = s.HoldAppLock(context.Background(), "a")
+	if err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("err = %v, want busy", err)
 	}
 }
 

@@ -63,6 +63,7 @@ Every command is operational. Each themed alias is the same command with identic
 | `run` | `materialize` | Daemon: per-app scheduling, deployments, health monitoring, reporting |
 | `check` | `divine` | Observe Git branches and registry digests without deploying |
 | `update` | `bless` | One deployment pass for `--app <id>` or `--all` through preflight and the per-app lock (`--dry-run` previews) |
+| `restart` | — | Bounce `--app <id>` containers without pulling, rebuilding, or advancing the deployed version |
 | `status` | `observe` | Deployed vs observed versions, pending updates, health, last deployment (`--json`) |
 | `logs` | `chronicle` | Bounded, filterable structured event history (`--json`) |
 | `expose` | — | Grant the strict systemd unit write access to a git worktree (run from its directory) or a rootless Docker socket, via the `ReadWritePaths` drop-in (`sudo`, idempotent) |

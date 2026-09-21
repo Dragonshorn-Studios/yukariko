@@ -80,6 +80,7 @@ and runs controlled local commands; it does not replace Compose, Coolify, or Por
 	root.AddCommand(a.newRunCommand())
 	root.AddCommand(a.newCheckCommand())
 	root.AddCommand(a.newUpdateCommand())
+	root.AddCommand(a.newRestartCommand())
 	root.AddCommand(a.newStatusCommand())
 	root.AddCommand(a.newLogsCommand())
 	root.AddCommand(a.newLearnCommand())

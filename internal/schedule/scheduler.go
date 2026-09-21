@@ -296,6 +296,29 @@ func (s *Scheduler) Trigger(ctx context.Context, appID string) error {
 	return nil
 }
 
+// HoldAppLock queues for the per-app lock the same way a manual update
+// does (wait, bounded by ManualTimeout and ctx). The returned release
+// func must be called exactly once. Scheduled passes still never queue.
+func (s *Scheduler) HoldAppLock(ctx context.Context, appID string) (release func(), err error) {
+	if _, ok := s.app(appID); !ok {
+		return nil, fmt.Errorf("unknown app %q", appID)
+	}
+	waitCtx := ctx
+	if s.opts.ManualTimeout > 0 {
+		var cancel context.CancelFunc
+		waitCtx, cancel = context.WithTimeout(ctx, s.opts.ManualTimeout)
+		defer cancel()
+	}
+	release, ok := s.locks.TryAcquire(appID)
+	if ok {
+		return release, nil
+	}
+	if release, err = s.locks.Acquire(waitCtx, appID); err != nil {
+		return nil, fmt.Errorf("app %q is busy: %w", appID, err)
+	}
+	return release, nil
+}
+
 // Reload swaps the app set (hot config reload) and re-runs preflight for
 // every app, recording findings as events. Loops for removed apps exit on
 // their next tick; loops for added apps start immediately.
