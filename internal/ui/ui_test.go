@@ -51,6 +51,15 @@ func uiServer(t *testing.T, now time.Time) (*Server, *httptest.Server) {
 	if err := st.RecordHealthSample(context.Background(), "web", "http", "healthy", "status 200", nil, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.RecordEvent(context.Background(), store.Event{
+		Time:    now.Add(-30 * time.Second),
+		AppID:   "web",
+		Level:   store.LevelInfo,
+		Kind:    "health",
+		Message: "http healthy",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.TouchRemoteHost(context.Background(), "peer-stale", now.Add(-5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -107,15 +116,18 @@ func TestDashboardGoldenFragments(t *testing.T) {
 		return readAll(resp)
 	}
 	sanctuary := get("/ui")
-	for _, want := range []string{"up-to-date", "peer-stale", "offline"} {
+	for _, want := range []string{"Synced", "Healthy", "peer-stale", "offline", "Chronicle", "http healthy"} {
 		if !strings.Contains(sanctuary, want) {
-			t.Errorf("sanctuary missing %q", want)
+			t.Errorf("status overview missing %q", want)
 		}
 	}
+	if strings.Contains(sanctuary, "Sanctuary") {
+		t.Error("status overview still shows liturgical Sanctuary chrome")
+	}
 	vestments := get("/ui/vestments")
-	for _, want := range []string{"app:1", "sha256:abcd", "current"} {
+	for _, want := range []string{"app:1", "sha256:abcd", "Synced"} {
 		if !strings.Contains(vestments, want) {
-			t.Errorf("vestments missing %q", want)
+			t.Errorf("versions missing %q", want)
 		}
 	}
 	if !strings.Contains(get("/ui/divination"), "healthy") {
@@ -167,10 +179,74 @@ func TestDashboardAccessibilitySmoke(t *testing.T) {
 		`<main id="main">`,
 		`aria-label="sections"`,
 		`class="skip"`,
-		`<th scope="col">`,
+		`aria-current="page"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("accessibility smoke missing %q", want)
+		}
+	}
+	resp2, err := http.Get(srv.URL + "/ui/vestments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if !strings.Contains(strings.ToLower(readAll(resp2)), `<th scope="col">`) {
+		t.Error("versions table missing column headers")
+	}
+}
+
+func TestLightLapisLock(t *testing.T) {
+	t.Parallel()
+	css, err := os.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(css)
+	for _, tok := range []string{
+		"--canvas: #F7F3EB",
+		"--surface: #FFFBF5",
+		"--ink: #1A1A18",
+		"--lapis: #2E5EA8",
+		"--mirage: #A8C4E8",
+		"--rose-gold: #B8956C",
+		"--ok: #2F6F5E",
+		"--fail: #9E3B3B",
+		"--stale:",
+		"prefers-reduced-motion",
+	} {
+		if !strings.Contains(text, tok) {
+			t.Errorf("style.css missing locked token %q", tok)
+		}
+	}
+	lower := strings.ToLower(text)
+	for _, forbidden := range []string{"#14213d", "#0d1628", "#b99a45", "--navy"} {
+		if strings.Contains(lower, forbidden) {
+			t.Errorf("style.css still carries retired palette token %q", forbidden)
+		}
+	}
+	assets, err := os.ReadFile(filepath.Join("..", "..", "docs", "ASSETS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(assets), "#14213d") || strings.Contains(strings.ToLower(string(assets)), "chapel") {
+		t.Error("docs/ASSETS.md still documents the retired chapel navy/gold lock")
+	}
+	_, srv := uiServer(t, time.Now())
+	resp, err := http.Get(srv.URL + "/ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readAll(resp)
+	for _, want := range []string{
+		"Status", "Versions", "Health", "Logs",
+		"Observe · Divine · Bless",
+		`class="mark"`,
+		`class="app-card"`,
+		`class="chronicle-panel`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status page missing %q", want)
 		}
 	}
 }

@@ -1,15 +1,17 @@
 // Package ui serves the embedded, read-only Yukariko dashboard: four
-// server-rendered sections (Sanctuary overview, Vestments versions,
-// Chronicle history, Divination health) built with html/template and
-// embedded assets only.
+// server-rendered sections (Status overview, Versions, Logs/Chronicle,
+// Health) built with html/template and embedded assets only. Template
+// filenames stay sanctuary/vestments/chronicle/divination; visible labels
+// are the user-facing names above.
 //
 // There are no state-changing controls, no forms, and no JavaScript: every
 // page renders from the same read-only query layer the CLI and API use,
 // and the only interactive element is plain links.
 //
 // All assets are original to this project (see docs/ASSETS.md): the
-// palette — deep navy, ivory, lapis, restrained gold — and the quiet
-// archive/chapel motifs are drawn with CSS alone.
+// light lapis lock — canvas, surface, ink, lapis, mirage, rose-gold,
+// ok, fail — plus a tiny faceted diamond mark, drawn with CSS and
+// inline SVG alone.
 package ui
 
 import (
@@ -73,10 +75,25 @@ type navLink struct {
 }
 
 var nav = []navLink{
-	{"/ui", "Sanctuary", "sanctuary"},
-	{"/ui/vestments", "Vestments", "vestments"},
-	{"/ui/chronicle", "Chronicle", "chronicle"},
-	{"/ui/divination", "Divination", "divination"},
+	{"/ui", "Status", "sanctuary"},
+	{"/ui/vestments", "Versions", "vestments"},
+	{"/ui/divination", "Health", "divination"},
+	{"/ui/chronicle", "Logs", "chronicle"},
+}
+
+func sectionTitle(section string) string {
+	switch section {
+	case "sanctuary":
+		return "Status"
+	case "vestments":
+		return "Versions"
+	case "chronicle":
+		return "Logs"
+	case "divination":
+		return "Health"
+	default:
+		return strings.ToUpper(section[:1]) + section[1:]
+	}
 }
 
 func (s *Server) page(section string) http.HandlerFunc {
@@ -99,7 +116,7 @@ func (s *Server) page(section string) http.HandlerFunc {
 
 func (s *Server) data(req *http.Request, section string) page {
 	p := page{
-		Title:   strings.ToUpper(section[:1]) + section[1:],
+		Title:   sectionTitle(section),
 		Section: section,
 		Nav:     nav,
 		Now:     s.now().UTC().Format(time.RFC3339),
@@ -117,13 +134,15 @@ func (s *Server) data(req *http.Request, section string) page {
 	return p
 }
 
-// sanctuaryRow is one overview card: running/health/update/deployment are
-// deliberately separate columns.
+// sanctuaryRow is one overview card: running/health/update/deployment stay
+// separate facts with distinct badge classes and labels.
 type sanctuaryRow struct {
 	ID        string
+	Name      string
+	Meta      string
 	Running   string // container presence (standalone) or "—"
 	Health    string // http/docker health summary
-	Update    string // up-to-date | pending | unknown
+	Update    string // Synced | Pending update | unknown
 	Deploy    string // last deployment outcome
 	Detail    string
 	BadUpdate string
@@ -143,37 +162,35 @@ func (s *Server) sanctuary(req *http.Request) any {
 		}
 		r := sanctuaryRow{
 			ID:      row.ID,
+			Name:    appName(app),
+			Meta:    appMeta(app),
 			Running: "—",
 			Health:  orDashText(row.Health),
 			Update:  "unknown",
 			Deploy:  orDashText(row.LastDeployment),
 			Detail:  row.Detail,
 		}
-		switch {
-		case strings.Contains(row.Health, ":unhealthy"):
-			r.Health = "unhealthy"
-		}
 		switch row.State {
 		case "up-to-date":
-			r.Update, r.BadUpdate = "up-to-date", "ok"
+			r.Update, r.BadUpdate = "Synced", "synced"
 		case "pending":
-			r.Update, r.BadUpdate = "pending update", "warn"
+			r.Update, r.BadUpdate = "Pending update", "warn"
 		case "failed":
-			r.Update, r.BadUpdate, r.Deploy = "failed", "fail", "failed"
+			r.Update, r.BadUpdate, r.Deploy = "Fail", "fail", "Fail"
 		case "stale":
-			r.Update, r.BadUpdate = "stale", "stale"
+			r.Update, r.BadUpdate = "Stale", "stale"
 		}
 		switch {
 		case strings.Contains(row.LastDeployment, "failed"):
-			r.Deploy, r.BadDeploy = "failed", "fail"
+			r.Deploy, r.BadDeploy = "Fail", "fail"
 		case row.LastDeployment != "":
-			r.Deploy, r.BadDeploy = "deployed", "ok"
+			r.Deploy, r.BadDeploy = "Deployed", "synced"
 		}
 		switch {
 		case strings.Contains(row.Health, ":unhealthy"):
-			r.BadHealth = "fail"
+			r.Health, r.BadHealth = "Unhealthy", "fail"
 		case strings.Contains(row.Health, ":healthy"):
-			r.BadHealth = "ok"
+			r.Health, r.BadHealth = "Healthy", "ok"
 		default:
 			r.BadHealth = "stale"
 			r.Health = orDashText(r.Health)
@@ -181,11 +198,56 @@ func (s *Server) sanctuary(req *http.Request) any {
 		r.Running = runningText(row)
 		rows = append(rows, r)
 	}
+	events, _ := state.EventsFor(ctx, s.Store, "", "", 8, 0)
 	return map[string]any{
 		"rows":      rows,
 		"reporting": reportingCard(ctx, s.Store, now),
 		"hosts":     hostRows(ctx, s.Store, now),
+		"events":    events,
 	}
+}
+
+func appName(app *config.App) string {
+	if app.DisplayName != "" {
+		return app.DisplayName
+	}
+	return app.ID
+}
+
+func appMeta(app *config.App) string {
+	var parts []string
+	switch app.Deploy.Mode {
+	case config.DeployCompose:
+		label := "Compose project"
+		if app.Deploy.Compose != nil && app.Deploy.Compose.ProjectName != "" {
+			label = "Compose · " + app.Deploy.Compose.ProjectName
+		}
+		parts = append(parts, label)
+	case config.DeployStandalone:
+		label := "Standalone container"
+		if app.Deploy.Standalone != nil && app.Deploy.Standalone.Name != "" {
+			label = "Standalone · " + app.Deploy.Standalone.Name
+		}
+		parts = append(parts, label)
+	}
+	switch app.Source.Mode {
+	case config.SourceGit:
+		if app.Source.Git != nil {
+			b := app.Source.Git.Branch
+			if b == "" {
+				b = "HEAD"
+			}
+			parts = append(parts, "git "+b)
+		}
+	case config.SourceRegistry:
+		if app.Source.Registry != nil && len(app.Source.Registry.Images) > 0 {
+			parts = append(parts, app.Source.Registry.Images[0].Ref)
+		}
+	}
+	if app.DisplayName != "" && app.DisplayName != app.ID {
+		parts = append(parts, app.ID)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func runningText(row state.AppStatus) string {

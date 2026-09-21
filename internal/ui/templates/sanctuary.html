@@ -1,37 +1,74 @@
 {{define "content"}}
-<h1>Sanctuary</h1>
-<p>The overview hall: every app at a glance. Running state, health, updates,
-and deployments are recorded separately — one cannot stand in for another.</p>
-<table>
-<caption>Configured applications</caption>
-<thead><tr><th scope="col">App</th><th scope="col">Running</th><th scope="col">Health</th><th scope="col">Update</th><th scope="col">Last deploy</th></tr></thead>
-<tbody>
-{{range .Data.rows}}
-<tr>
-  <th scope="row">{{.ID}}</th>
-  <td>{{.Running}}</td>
-  <td>{{if .BadHealth}}<span class="badge {{.BadHealth}}">{{.Health}}</span>{{else}}{{.Health}}{{end}}</td>
-  <td><span class="badge {{.BadUpdate}}">{{.Update}}</span></td>
-  <td>{{if .BadDeploy}}<span class="badge {{.BadDeploy}}">{{.Deploy}}</span>{{else}}{{.Deploy}}{{end}}</td>
-</tr>
-{{else}}
-<tr><td colspan="5">No applications configured.</td></tr>
-{{end}}
-</tbody>
-</table>
+<h1 class="visually-hidden">Status</h1>
+<div class="status-layout">
+  <div>
+    {{if .Data.rows}}
+    <ul class="app-list">
+    {{range .Data.rows}}
+      <li>
+        <article class="app-card">
+          <div>
+            <h2 class="app-name">{{.Name}}</h2>
+            <p class="app-meta">{{.Meta}}</p>
+            <p class="app-facts">
+              <span><span class="label">Running</span> {{.Running}}</span>
+              <span><span class="label">Health</span>
+                {{if .BadHealth}}<span class="badge {{.BadHealth}}">{{.Health}}</span>{{else}}{{.Health}}{{end}}
+              </span>
+              <span><span class="label">Deploy</span>
+                {{if .BadDeploy}}<span class="badge {{.BadDeploy}}">{{.Deploy}}</span>{{else}}{{.Deploy}}{{end}}
+              </span>
+            </p>
+          </div>
+          <div class="app-card-status">
+            <span class="badge {{.BadUpdate}}">{{.Update}}</span>
+          </div>
+        </article>
+      </li>
+    {{end}}
+    </ul>
+    {{else}}
+    <p class="empty-card">No applications configured.</p>
+    {{end}}
 
-<h2>Reporting</h2>
-<p>Outbox backlog: <strong>{{.Data.reporting.backlog}}</strong> · last delivery {{.Data.reporting.last}}
-{{if .Data.reporting.degraded}}<span class="badge stale">degraded</span>{{end}}</p>
+    <section class="secondary" aria-labelledby="hosts-heading">
+      <h2 id="hosts-heading">Hosts</h2>
+      <ul class="host-list">
+      {{range .Data.hosts}}
+        <li class="host-row">
+          <div>
+            <p class="host-id">{{.id}}</p>
+            <p class="host-source">{{.source}}</p>
+          </div>
+          <span class="badge {{.cls}}">{{.state}}</span>
+        </li>
+      {{end}}
+      </ul>
+      <p class="report-line">Outbox backlog: <strong>{{.Data.reporting.backlog}}</strong> · last delivery {{.Data.reporting.last}}
+      {{if .Data.reporting.degraded}}<span class="badge stale">degraded</span>{{end}}</p>
+    </section>
+  </div>
 
-<h2>Hosts</h2>
-<table>
-<caption>Known hosts and report freshness</caption>
-<thead><tr><th scope="col">Host</th><th scope="col">Source</th><th scope="col">Availability</th></tr></thead>
-<tbody>
-{{range .Data.hosts}}
-<tr><th scope="row">{{.id}}</th><td>{{.source}}</td><td><span class="badge {{.cls}}">{{.state}}</span></td></tr>
-{{end}}
-</tbody>
-</table>
+  <aside class="chronicle-panel panel" aria-labelledby="chronicle-heading">
+    <h2 id="chronicle-heading">Chronicle</h2>
+    {{if .Data.events}}
+    <ol class="chronicle-list">
+    {{range .Data.events}}
+      <li class="chronicle-item">
+        <span class="dot {{.Level}}" aria-hidden="true"></span>
+        <time datetime="{{.Time.Format "2006-01-02T15:04:05Z07:00"}}">{{.Time.UTC.Format "15:04:05"}}</time>
+        <div class="event-body">
+          {{if .AppID}}<span class="event-app">{{.AppID}}</span>{{end}}
+          <p class="event-msg">{{.Message}}</p>
+        </div>
+      </li>
+    {{end}}
+    </ol>
+    <p class="chronicle-foot">Showing last {{len .Data.events}} events · <a href="/ui/chronicle">Logs</a></p>
+    {{else}}
+    <p class="empty-note">No events recorded.</p>
+    <p class="chronicle-foot"><a href="/ui/chronicle">Logs</a></p>
+    {{end}}
+  </aside>
+</div>
 {{end}}
