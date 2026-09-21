@@ -1,15 +1,20 @@
 // Package ui serves the embedded, read-only Yukariko dashboard: four
-// server-rendered sections (Sanctuary overview, Vestments versions,
-// Chronicle history, Divination health) built with html/template and
-// embedded assets only.
+// server-rendered sections (Status overview, Versions, Logs/Chronicle,
+// Health) built with html/template and embedded assets only. Template
+// filenames stay sanctuary/vestments/chronicle/divination; visible labels
+// are the user-facing names above.
 //
-// There are no state-changing controls, no forms, and no JavaScript: every
-// page renders from the same read-only query layer the CLI and API use,
-// and the only interactive element is plain links.
+// There are no state-changing controls and no forms: every page renders
+// from the same read-only query layer the CLI and API use. A tiny original
+// live.js (progressive enhancement) GETs the same HTML and swaps #main and
+// footer so JS browsers avoid a full reload; the meta refresh remains the
+// no-JS fallback. The Updating chip uses a CSS spinner (static under
+// prefers-reduced-motion).
 //
 // All assets are original to this project (see docs/ASSETS.md): the
-// palette — deep navy, ivory, lapis, restrained gold — and the quiet
-// archive/chapel motifs are drawn with CSS alone.
+// light lapis lock — canvas, surface, ink, lapis, mirage, rose-gold,
+// ok, fail — plus a tiny faceted diamond mark, drawn with CSS and
+// inline SVG alone.
 package ui
 
 import (
@@ -25,7 +30,7 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 )
 
-//go:embed templates/*.html static/style.css
+//go:embed templates/*.html static/style.css static/live.js
 var files embed.FS
 
 // Server renders the dashboard from the durable store and configuration.
@@ -38,18 +43,27 @@ type Server struct {
 // Handler builds the UI routes, all GET/HEAD-only.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ui/static/style.css", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		css, _ := files.ReadFile("static/style.css")
-		w.Write(css)
-	})
+	mux.HandleFunc("GET /ui/static/style.css", s.static("static/style.css", "text/css; charset=utf-8", "public, max-age=3600"))
+	mux.HandleFunc("GET /ui/static/live.js", s.static("static/live.js", "text/javascript; charset=utf-8", "public, max-age=300"))
 	mux.HandleFunc("GET /ui", s.page("sanctuary"))
 	mux.HandleFunc("GET /ui/", s.page("sanctuary"))
 	mux.HandleFunc("GET /ui/vestments", s.page("vestments"))
 	mux.HandleFunc("GET /ui/chronicle", s.page("chronicle"))
 	mux.HandleFunc("GET /ui/divination", s.page("divination"))
 	return mux
+}
+
+func (s *Server) static(name, contentType, cache string) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", cache)
+		data, err := files.ReadFile(name)
+		if err != nil {
+			http.NotFound(w, req)
+			return
+		}
+		w.Write(data)
+	}
 }
 
 func (s *Server) now() time.Time {
@@ -66,17 +80,38 @@ type page struct {
 	Data     any
 	Now      string
 	HostName string
+	Refresh  int // meta-refresh seconds; always set so the view stays live
 }
+
+const (
+	refreshIdleSeconds = 12
+	refreshBusySeconds = 5
+)
 
 type navLink struct {
 	Href, Label, Section string
 }
 
 var nav = []navLink{
-	{"/ui", "Sanctuary", "sanctuary"},
-	{"/ui/vestments", "Vestments", "vestments"},
-	{"/ui/chronicle", "Chronicle", "chronicle"},
-	{"/ui/divination", "Divination", "divination"},
+	{"/ui", "Status", "sanctuary"},
+	{"/ui/vestments", "Versions", "vestments"},
+	{"/ui/divination", "Health", "divination"},
+	{"/ui/chronicle", "Logs", "chronicle"},
+}
+
+func sectionTitle(section string) string {
+	switch section {
+	case "sanctuary":
+		return "Status"
+	case "vestments":
+		return "Versions"
+	case "chronicle":
+		return "Logs"
+	case "divination":
+		return "Health"
+	default:
+		return strings.ToUpper(section[:1]) + section[1:]
+	}
 }
 
 func (s *Server) page(section string) http.HandlerFunc {
@@ -88,6 +123,8 @@ func (s *Server) page(section string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'")
 		data := s.data(req, section)
 		if err := tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
 			// Headers may already be written; log-free minimal fallback.
@@ -99,10 +136,11 @@ func (s *Server) page(section string) http.HandlerFunc {
 
 func (s *Server) data(req *http.Request, section string) page {
 	p := page{
-		Title:   strings.ToUpper(section[:1]) + section[1:],
+		Title:   sectionTitle(section),
 		Section: section,
 		Nav:     nav,
 		Now:     s.now().UTC().Format(time.RFC3339),
+		Refresh: refreshIdleSeconds,
 	}
 	switch section {
 	case "sanctuary":
@@ -114,21 +152,39 @@ func (s *Server) data(req *http.Request, section string) page {
 	case "divination":
 		p.Data = s.divination(req)
 	}
+	if s.anyOpenDeployment(req.Context()) {
+		p.Refresh = refreshBusySeconds
+	}
 	return p
 }
 
-// sanctuaryRow is one overview card: running/health/update/deployment are
-// deliberately separate columns.
+func (s *Server) anyOpenDeployment(ctx context.Context) bool {
+	if s.Store == nil || s.Config == nil {
+		return false
+	}
+	for i := range s.Config.Apps {
+		if _, ok, err := s.Store.OpenDeployment(ctx, s.Config.Apps[i].ID); err == nil && ok {
+			return true
+		}
+	}
+	return false
+}
+
+// sanctuaryRow is one overview card: running/health/update/deployment stay
+// separate facts with distinct badge classes and labels.
 type sanctuaryRow struct {
 	ID        string
+	Name      string
+	Meta      string
 	Running   string // container presence (standalone) or "—"
 	Health    string // http/docker health summary
-	Update    string // up-to-date | pending | unknown
+	Update    string // Synced | Pending update | unknown
 	Deploy    string // last deployment outcome
 	Detail    string
 	BadUpdate string
 	BadHealth string
 	BadDeploy string
+	Updating  bool
 }
 
 func (s *Server) sanctuary(req *http.Request) any {
@@ -143,49 +199,98 @@ func (s *Server) sanctuary(req *http.Request) any {
 		}
 		r := sanctuaryRow{
 			ID:      row.ID,
+			Name:    appName(app),
+			Meta:    appMeta(app),
 			Running: "—",
 			Health:  orDashText(row.Health),
 			Update:  "unknown",
 			Deploy:  orDashText(row.LastDeployment),
 			Detail:  row.Detail,
 		}
-		switch {
-		case strings.Contains(row.Health, ":unhealthy"):
-			r.Health = "unhealthy"
-		}
 		switch row.State {
 		case "up-to-date":
-			r.Update, r.BadUpdate = "up-to-date", "ok"
+			r.Update, r.BadUpdate = "Synced", "synced"
 		case "pending":
-			r.Update, r.BadUpdate = "pending update", "warn"
+			r.Update, r.BadUpdate = "Pending update", "warn"
 		case "failed":
-			r.Update, r.BadUpdate, r.Deploy = "failed", "fail", "failed"
+			r.Update, r.BadUpdate, r.Deploy = "Fail", "fail", "Fail"
 		case "stale":
-			r.Update, r.BadUpdate = "stale", "stale"
+			r.Update, r.BadUpdate = "Stale", "stale"
 		}
 		switch {
 		case strings.Contains(row.LastDeployment, "failed"):
-			r.Deploy, r.BadDeploy = "failed", "fail"
+			r.Deploy, r.BadDeploy = "Fail", "fail"
 		case row.LastDeployment != "":
-			r.Deploy, r.BadDeploy = "deployed", "ok"
+			r.Deploy, r.BadDeploy = "Deployed", "synced"
 		}
 		switch {
 		case strings.Contains(row.Health, ":unhealthy"):
-			r.BadHealth = "fail"
+			r.Health, r.BadHealth = "Unhealthy", "fail"
 		case strings.Contains(row.Health, ":healthy"):
-			r.BadHealth = "ok"
+			r.Health, r.BadHealth = "Healthy", "ok"
 		default:
 			r.BadHealth = "stale"
 			r.Health = orDashText(r.Health)
 		}
 		r.Running = runningText(row)
+		if _, open, err := s.Store.OpenDeployment(ctx, app.ID); err == nil && open {
+			r.Updating = true
+			r.Update, r.BadUpdate = "Updating", "updating"
+			r.Deploy, r.BadDeploy = "in progress", "updating"
+			r.Running = "updating"
+		}
 		rows = append(rows, r)
 	}
+	events, _ := state.EventsFor(ctx, s.Store, "", "", 8, 0)
 	return map[string]any{
 		"rows":      rows,
 		"reporting": reportingCard(ctx, s.Store, now),
 		"hosts":     hostRows(ctx, s.Store, now),
+		"events":    events,
 	}
+}
+
+func appName(app *config.App) string {
+	if app.DisplayName != "" {
+		return app.DisplayName
+	}
+	return app.ID
+}
+
+func appMeta(app *config.App) string {
+	var parts []string
+	switch app.Deploy.Mode {
+	case config.DeployCompose:
+		label := "Compose project"
+		if app.Deploy.Compose != nil && app.Deploy.Compose.ProjectName != "" {
+			label = "Compose · " + app.Deploy.Compose.ProjectName
+		}
+		parts = append(parts, label)
+	case config.DeployStandalone:
+		label := "Standalone container"
+		if app.Deploy.Standalone != nil && app.Deploy.Standalone.Name != "" {
+			label = "Standalone · " + app.Deploy.Standalone.Name
+		}
+		parts = append(parts, label)
+	}
+	switch app.Source.Mode {
+	case config.SourceGit:
+		if app.Source.Git != nil {
+			b := app.Source.Git.Branch
+			if b == "" {
+				b = "HEAD"
+			}
+			parts = append(parts, "git "+b)
+		}
+	case config.SourceRegistry:
+		if app.Source.Registry != nil && len(app.Source.Registry.Images) > 0 {
+			parts = append(parts, app.Source.Registry.Images[0].Ref)
+		}
+	}
+	if app.DisplayName != "" && app.DisplayName != app.ID {
+		parts = append(parts, app.ID)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func runningText(row state.AppStatus) string {
@@ -250,6 +355,7 @@ type vestmentRow struct {
 	Deployed string
 	Pending  bool
 	Note     string
+	Updating bool
 }
 
 func (s *Server) vestments(req *http.Request) any {
@@ -269,6 +375,7 @@ func (s *Server) vestments(req *http.Request) any {
 		if len(images) == 0 {
 			images = append(images, "git worktree: "+orDashText(app.Source.Git.Dir))
 		}
+		_, open, _ := s.Store.OpenDeployment(ctx, app.ID)
 		rows = append(rows, vestmentRow{
 			App:      app.ID,
 			Image:    strings.Join(images, ", "),
@@ -276,6 +383,7 @@ func (s *Server) vestments(req *http.Request) any {
 			Deployed: orDashOK(short(deployed), depOK),
 			Pending:  obsOK && depOK && observed != deployed,
 			Note:     pendingNote(obsOK, depOK),
+			Updating: open,
 		})
 	}
 	return map[string]any{"rows": rows}

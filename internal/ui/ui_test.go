@@ -51,6 +51,15 @@ func uiServer(t *testing.T, now time.Time) (*Server, *httptest.Server) {
 	if err := st.RecordHealthSample(context.Background(), "web", "http", "healthy", "status 200", nil, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.RecordEvent(context.Background(), store.Event{
+		Time:    now.Add(-30 * time.Second),
+		AppID:   "web",
+		Level:   store.LevelInfo,
+		Kind:    "health",
+		Message: "http healthy",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.TouchRemoteHost(context.Background(), "peer-stale", now.Add(-5*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
@@ -107,15 +116,18 @@ func TestDashboardGoldenFragments(t *testing.T) {
 		return readAll(resp)
 	}
 	sanctuary := get("/ui")
-	for _, want := range []string{"up-to-date", "peer-stale", "offline"} {
+	for _, want := range []string{"Synced", "Healthy", "peer-stale", "offline", "Chronicle", "http healthy"} {
 		if !strings.Contains(sanctuary, want) {
-			t.Errorf("sanctuary missing %q", want)
+			t.Errorf("status overview missing %q", want)
 		}
 	}
+	if strings.Contains(sanctuary, "Sanctuary") {
+		t.Error("status overview still shows liturgical Sanctuary chrome")
+	}
 	vestments := get("/ui/vestments")
-	for _, want := range []string{"app:1", "sha256:abcd", "current"} {
+	for _, want := range []string{"app:1", "sha256:abcd", "Pending update"} {
 		if !strings.Contains(vestments, want) {
-			t.Errorf("vestments missing %q", want)
+			t.Errorf("versions missing %q", want)
 		}
 	}
 	if !strings.Contains(get("/ui/divination"), "healthy") {
@@ -126,7 +138,7 @@ func TestDashboardGoldenFragments(t *testing.T) {
 	}
 }
 
-func TestDashboardNoScriptAndReadOnly(t *testing.T) {
+func TestDashboardReadOnlyAndWorksWithoutJS(t *testing.T) {
 	t.Parallel()
 	_, srv := uiServer(t, time.Now())
 	for _, route := range []string{"/ui", "/ui/vestments", "/ui/chronicle", "/ui/divination"} {
@@ -136,11 +148,20 @@ func TestDashboardNoScriptAndReadOnly(t *testing.T) {
 		}
 		body := strings.ToLower(readAll(resp))
 		resp.Body.Close()
-		if strings.Contains(body, "<script") {
-			t.Errorf("%s contains JavaScript; the dashboard must work with JS disabled", route)
-		}
 		if strings.Contains(body, "<form") {
 			t.Errorf("%s contains a form; the dashboard is read-only", route)
+		}
+		if !strings.Contains(body, `src="/ui/static/live.js"`) {
+			t.Errorf("%s missing the live.js progressive enhancement", route)
+		}
+		if strings.Count(body, "<script") != 1 {
+			t.Errorf("%s should have exactly one script tag, got a page that may pull extra JS", route)
+		}
+		if strings.Contains(body, "http://") || strings.Contains(body, "https://") {
+			// layout has no third-party URLs; allow none in the document.
+			if strings.Contains(body, "cdn.") || strings.Contains(body, "unpkg") || strings.Contains(body, "jsdelivr") {
+				t.Errorf("%s pulls a third-party script host", route)
+			}
 		}
 	}
 	resp, err := http.Post(srv.URL+"/ui", "text/plain", nil)
@@ -167,10 +188,77 @@ func TestDashboardAccessibilitySmoke(t *testing.T) {
 		`<main id="main">`,
 		`aria-label="sections"`,
 		`class="skip"`,
-		`<th scope="col">`,
+		`aria-current="page"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("accessibility smoke missing %q", want)
+		}
+	}
+	resp2, err := http.Get(srv.URL + "/ui/vestments")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if !strings.Contains(strings.ToLower(readAll(resp2)), `<th scope="col">`) {
+		t.Error("versions table missing column headers")
+	}
+}
+
+func TestLightLapisLock(t *testing.T) {
+	t.Parallel()
+	css, err := os.ReadFile("static/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(css)
+	for _, tok := range []string{
+		"--canvas: #F7F3EB",
+		"--surface: #FFFBF5",
+		"--ink: #1A1A18",
+		"--lapis: #2E5EA8",
+		"--mirage: #A8C4E8",
+		"--rose-gold: #B8956C",
+		"--ok: #2F6F5E",
+		"--fail: #9E3B3B",
+		"--stale:",
+		"prefers-reduced-motion",
+		"yukariko-spin",
+		".badge.updating",
+	} {
+		if !strings.Contains(text, tok) {
+			t.Errorf("style.css missing locked token %q", tok)
+		}
+	}
+	lower := strings.ToLower(text)
+	for _, forbidden := range []string{"#14213d", "#0d1628", "#b99a45", "--navy"} {
+		if strings.Contains(lower, forbidden) {
+			t.Errorf("style.css still carries retired palette token %q", forbidden)
+		}
+	}
+	assets, err := os.ReadFile(filepath.Join("..", "..", "docs", "ASSETS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(assets), "#14213d") || strings.Contains(strings.ToLower(string(assets)), "chapel") {
+		t.Error("docs/ASSETS.md still documents the retired chapel navy/gold lock")
+	}
+	_, srv := uiServer(t, time.Now())
+	resp, err := http.Get(srv.URL + "/ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body := readAll(resp)
+	for _, want := range []string{
+		"Status", "Versions", "Health", "Logs",
+		"Observe · Divine · Bless",
+		`class="mark"`,
+		`class="app-card"`,
+		`class="chronicle-panel"`,
+		`http-equiv="refresh"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status page missing %q", want)
 		}
 	}
 }
@@ -192,5 +280,95 @@ func TestAssetInventoryDocumented(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join("..", "..", "docs", "ASSETS.md")); err != nil {
 		t.Error("docs/ASSETS.md must exist and inventory the assets")
+	}
+}
+
+func TestUpdatingChipAndLiveRefresh(t *testing.T) {
+	t.Parallel()
+	s, srv := uiServer(t, time.Now())
+	idle := func(path string) string {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s Cache-Control = %q, want no-store", path, resp.Header.Get("Cache-Control"))
+		}
+		return readAll(resp)
+	}
+	if !strings.Contains(idle("/ui"), `http-equiv="refresh" content="12"`) {
+		t.Error("idle status page should refresh every 12s")
+	}
+	if _, err := s.Store.BeginDeployment(context.Background(), store.BeginDeploymentParams{
+		AppID: "web", Cause: "manual", At: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status := idle("/ui")
+	for _, want := range []string{
+		"Updating",
+		`class="badge updating"`,
+		`is-updating`,
+		`aria-busy="true"`,
+		`http-equiv="refresh" content="5"`,
+	} {
+		if !strings.Contains(status, want) {
+			t.Errorf("in-progress status missing %q", want)
+		}
+	}
+	if strings.Contains(status, `content="12"`) {
+		t.Error("in-progress refresh should be 5s, not idle 12s")
+	}
+	if !strings.Contains(idle("/ui/vestments"), `class="badge updating"`) {
+		t.Error("versions should mark the in-progress app as Updating")
+	}
+	if !strings.Contains(idle("/ui/chronicle"), "Updating") {
+		t.Error("logs should mark a running deployment as Updating")
+	}
+}
+
+func TestLiveJSProgressiveEnhancement(t *testing.T) {
+	t.Parallel()
+	_, srv := uiServer(t, time.Now())
+	resp, err := http.Get(srv.URL + "/ui/static/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("live.js = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Type"), "javascript") {
+		t.Errorf("live.js Content-Type = %q", resp.Header.Get("Content-Type"))
+	}
+	js := readAll(resp)
+	for _, want := range []string{
+		"docs/ASSETS.md",
+		`fetch(`,
+		`"#main"`,
+		`meta[http-equiv="refresh"]`,
+		"credentials: \"same-origin\"",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("live.js missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"eval(", "Function(", "innerHTML = fetch", "XMLHttpRequest", "http://", "https://"} {
+		if strings.Contains(js, forbidden) {
+			t.Errorf("live.js contains %q", forbidden)
+		}
+	}
+	page, err := http.Get(srv.URL + "/ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Body.Close()
+	html := readAll(page)
+	if !strings.Contains(html, `http-equiv="refresh"`) {
+		t.Error("HTML must keep meta refresh as the no-JS fallback")
+	}
+	if !strings.Contains(page.Header.Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Error("HTML should lock scripts to same-origin")
 	}
 }

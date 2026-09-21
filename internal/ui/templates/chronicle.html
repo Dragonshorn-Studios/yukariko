@@ -1,28 +1,40 @@
 {{define "content"}}
-<h1>Chronicle</h1>
-<p>The bounded record: recent events and deployments, newest first.</p>
-<h2>Deployments</h2>
-<table>
-<caption>Recent deployments</caption>
-<thead><tr><th scope="col">App</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Detail</th></tr></thead>
-<tbody>
-{{range .Data.deployments}}
-<tr><th scope="row">{{.AppID}}</th><td><span class="badge {{if eq .Status "failed"}}fail{{else}}ok{{end}}">{{.Status}}</span></td><td>{{.StartedAt.Format "2006-01-02 15:04:05"}}</td><td>{{.Error}}</td></tr>
-{{else}}
-<tr><td colspan="4">No deployments recorded.</td></tr>
-{{end}}
-</tbody>
-</table>
-<h2>Events</h2>
-<table>
-<caption>Recent events</caption>
-<thead><tr><th scope="col">Time</th><th scope="col">Level</th><th scope="col">App</th><th scope="col">Kind</th><th scope="col">Message</th></tr></thead>
-<tbody>
-{{range .Data.events}}
-<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Level}}</td><td>{{or .AppID "—"}}</td><td>{{.Kind}}</td><td>{{.Message}}</td></tr>
-{{else}}
-<tr><td colspan="5">No events recorded.</td></tr>
-{{end}}
-</tbody>
-</table>
+<h1>Logs</h1>
+<p class="lede">The bounded record: recent events and deployments, newest first.</p>
+<div class="stack">
+<section class="chronicle-panel" aria-labelledby="chronicle-heading">
+  <h2 id="chronicle-heading">Chronicle</h2>
+  {{if .Data.events}}
+  <ol class="chronicle-list">
+  {{range .Data.events}}
+    <li class="chronicle-item">
+      <span class="dot {{.Level}}" aria-hidden="true"></span>
+      <time datetime="{{.Time.Format "2006-01-02T15:04:05Z07:00"}}">{{.Time.UTC.Format "15:04:05"}}</time>
+      <div class="event-body">
+        {{if .AppID}}<span class="event-app">{{.AppID}}</span>{{else}}<span class="event-app">system</span>{{end}}
+        <p class="event-msg">{{.Kind}} · {{.Message}}</p>
+      </div>
+    </li>
+  {{end}}
+  </ol>
+  {{else}}
+  <p class="empty-note">No events recorded.</p>
+  {{end}}
+</section>
+
+<section class="panel" aria-labelledby="deployments-heading">
+  <h2 id="deployments-heading">Deployments</h2>
+  <table>
+  <caption>Recent deployments</caption>
+  <thead><tr><th scope="col">App</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Detail</th></tr></thead>
+  <tbody>
+  {{range .Data.deployments}}
+  <tr><th scope="row">{{.AppID}}</th><td>{{if eq .Status "running"}}<span class="badge updating">Updating</span>{{else if eq .Status "failed"}}<span class="badge fail">{{.Status}}</span>{{else}}<span class="badge synced">{{.Status}}</span>{{end}}</td><td>{{.StartedAt.Format "2006-01-02 15:04:05"}}</td><td>{{.Error}}</td></tr>
+  {{else}}
+  <tr><td colspan="4">No deployments recorded.</td></tr>
+  {{end}}
+  </tbody>
+  </table>
+</section>
+</div>
 {{end}}

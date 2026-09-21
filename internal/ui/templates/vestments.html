@@ -1,7 +1,7 @@
 {{define "content"}}
-<h1>Vestments</h1>
-<p>What each app is dressed in: configured images and versions, what was last
-observed, and what was last deployed — and whether the two disagree.</p>
+<h1>Versions</h1>
+<p class="lede">Configured images and versions, last observed versus last
+deployed — and whether the two disagree.</p>
 <table>
 <caption>Observed and deployed versions</caption>
 <thead><tr><th scope="col">App</th><th scope="col">Configured</th><th scope="col">Observed</th><th scope="col">Deployed</th><th scope="col">Pending</th></tr></thead>
@@ -12,7 +12,7 @@ observed, and what was last deployed — and whether the two disagree.</p>
   <td>{{.Image}}</td>
   <td>{{.Observed}}</td>
   <td>{{.Deployed}}</td>
-  <td>{{if .Pending}}<span class="badge warn">pending</span>{{else if .Note}}{{.Note}}{{else}}<span class="badge ok">current</span>{{end}}</td>
+  <td>{{if .Updating}}<span class="badge updating">Updating</span>{{else if .Pending}}<span class="badge warn">Pending update</span>{{else if .Note}}{{.Note}}{{else}}<span class="badge synced">Synced</span>{{end}}</td>
 </tr>
 {{else}}
 <tr><td colspan="5">No applications configured.</td></tr>
