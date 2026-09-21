@@ -40,8 +40,9 @@ func (a *Assembled) Restart(ctx context.Context, appID string) error {
 	// The running row is only a lock token. Delete it whether the bounce
 	// succeeds or fails so restart is not a deployment record and cannot
 	// advance the checkpoint. A crash leaves the row for the existing
-	// stale-row reap, same as a crashed deploy.
-	defer func() { _ = a.Store.ReleaseRunningDeployment(ctx, depID) }()
+	// stale-row reap, same as a crashed deploy. WithoutCancel detaches the
+	// release from the request ctx: a cancelled bounce still frees the lock.
+	defer func() { _ = a.Store.ReleaseRunningDeployment(context.WithoutCancel(ctx), depID) }()
 
 	a.recordRestart(ctx, appID, store.LevelInfo, "restart requested")
 	restarter := &deploy.Restarter{
@@ -67,7 +68,9 @@ func (a *Assembled) appByID(id string) (*config.App, error) {
 }
 
 func (a *Assembled) recordRestart(ctx context.Context, appID, level, message string) {
-	_, _ = a.Store.RecordEvent(ctx, store.Event{
+	// WithoutCancel keeps the outcome durable when the request ctx died
+	// mid-bounce (SIGINT), which is exactly when the audit record matters.
+	_, _ = a.Store.RecordEvent(context.WithoutCancel(ctx), store.Event{
 		Time:    time.Now(),
 		AppID:   appID,
 		Level:   level,

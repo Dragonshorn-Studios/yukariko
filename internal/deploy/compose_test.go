@@ -24,6 +24,7 @@ type fakeExec struct {
 	argvs   [][]string
 	dirs    []string
 	envs    [][]string
+	reqs    []runner.Request
 	respond func(req runner.Request) runner.Result
 }
 
@@ -32,6 +33,7 @@ func (f *fakeExec) run(_ context.Context, req runner.Request) (runner.Result, er
 	f.argvs = append(f.argvs, req.Argv)
 	f.dirs = append(f.dirs, req.Dir)
 	f.envs = append(f.envs, req.Env)
+	f.reqs = append(f.reqs, req)
 	f.mu.Unlock()
 	if f.respond != nil {
 		return f.respond(req), nil
@@ -57,6 +59,12 @@ func (f *fakeExec) allEnvs() [][]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([][]string(nil), f.envs...)
+}
+
+func (f *fakeExec) requests() []runner.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]runner.Request(nil), f.reqs...)
 }
 
 func (f *fakeExec) joined() string {

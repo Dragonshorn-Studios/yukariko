@@ -104,7 +104,7 @@ func TestClaimDeployment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = d.claimDeployment(ctx, app)
+	_, err = d.claimDeploymentCause(ctx, app, "update")
 	if err == nil || !strings.Contains(err.Error(), "already in progress") || !strings.Contains(err.Error(), "scheduled") {
 		t.Fatalf("err = %v, want the in-progress bail naming the holder", err)
 	}
@@ -119,7 +119,7 @@ func TestClaimDeployment(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = stale
-	claimed, err := d.claimDeployment(ctx, app)
+	claimed, err := d.claimDeploymentCause(ctx, app, "update")
 	if err != nil {
 		t.Fatalf("claim after stale = %v", err)
 	}

@@ -433,10 +433,6 @@ func deploymentBudget(app *config.App) time.Duration {
 // CLI) holds a fresh row, this pass bails with a clear message; when the
 // row is older than any live pass could be, the owning process is gone
 // and the row is reaped so one crash cannot block the app forever.
-func (d *DeployDispatcher) claimDeployment(ctx context.Context, app *config.App) (string, error) {
-	return d.claimDeploymentCause(ctx, app, "update")
-}
-
 func (d *DeployDispatcher) claimDeploymentCause(ctx context.Context, app *config.App, cause string) (string, error) {
 	if cause == "" {
 		cause = "update"

@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -29,30 +30,34 @@ func TestRestartArgv(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		app      *config.App
-		fallback *config.DockerEndpoint
-		want     string
-		wantDir  string
+		name        string
+		app         *config.App
+		fallback    *config.DockerEndpoint
+		want        string
+		wantDir     string
+		wantTimeout time.Duration
 	}{
 		{
-			name:    "compose uses exact context and app endpoint flags",
-			app:     compose,
-			want:    "docker --context rootless compose -f /srv/web/compose.yaml -f /srv/web/override.yaml --env-file /srv/web/.env --profile edge -p web restart",
-			wantDir: "/srv/web",
+			name:        "compose uses exact context and app endpoint flags",
+			app:         compose,
+			want:        "docker --context rootless compose -f /srv/web/compose.yaml -f /srv/web/override.yaml --env-file /srv/web/.env --profile edge -p web restart",
+			wantDir:     "/srv/web",
+			wantTimeout: appTimeout(compose),
 		},
 		{
-			name:    "standalone restarts the configured name with host flags",
-			app:     standalone,
-			want:    "docker -H unix:///run/user/1000/docker.sock restart box-1",
-			wantDir: "",
+			name:        "standalone restarts the configured name with host flags",
+			app:         standalone,
+			want:        "docker -H unix:///run/user/1000/docker.sock restart box-1",
+			wantDir:     "",
+			wantTimeout: 2 * time.Minute,
 		},
 		{
-			name:     "compose falls back to the configuration-wide endpoint",
-			app:      composeApp(),
-			fallback: &config.DockerEndpoint{Context: "desktop-linux"},
-			want:     "docker --context desktop-linux compose -f /srv/web/compose.yaml -f /srv/web/override.yaml --env-file /srv/web/.env --profile edge -p web restart",
-			wantDir:  "/srv/web",
+			name:        "compose falls back to the configuration-wide endpoint",
+			app:         composeApp(),
+			fallback:    &config.DockerEndpoint{Context: "desktop-linux"},
+			want:        "docker --context desktop-linux compose -f /srv/web/compose.yaml -f /srv/web/override.yaml --env-file /srv/web/.env --profile edge -p web restart",
+			wantDir:     "/srv/web",
+			wantTimeout: appTimeout(composeApp()),
 		},
 	}
 
@@ -72,6 +77,13 @@ func TestRestartArgv(t *testing.T) {
 			}
 			if envs := exec.allEnvs(); len(envs) != 1 || len(envs[0]) != 0 {
 				t.Fatalf("env = %v, want empty (endpoint lives in argv flags)", envs)
+			}
+			reqs := exec.requests()
+			if len(reqs) != 1 || reqs[0].Timeout != tt.wantTimeout {
+				t.Fatalf("timeout = %v, want %s", reqs, tt.wantTimeout)
+			}
+			if reqs[0].AppID != tt.app.ID {
+				t.Fatalf("app id = %q, want %q", reqs[0].AppID, tt.app.ID)
 			}
 		})
 	}
@@ -104,16 +116,49 @@ func TestRestartRejectsUnknownModeAndFailedCommand(t *testing.T) {
 	}
 }
 
-func TestRestartDoesNotInvokeCheckpoint(t *testing.T) {
+// TestRestartErrorDetailFallbacks pins execChecked's failure detail chain:
+// runner error propagates, res.Err is preferred, then stderr, then status.
+func TestRestartErrorDetailFallbacks(t *testing.T) {
 	t.Parallel()
-	// Restarter has no VersionCheckpoint field; a successful bounce must
-	// be impossible to confuse with a deploy. The type assertion documents
-	// that boundary.
-	var r any = &Restarter{Run: (&fakeExec{}).run}
-	if _, ok := r.(VersionCheckpoint); ok {
-		t.Fatal("Restarter must not implement VersionCheckpoint")
+
+	app := &config.App{
+		ID: "box",
+		Deploy: config.Deploy{
+			Mode:       config.DeployStandalone,
+			Standalone: &config.StandaloneSpec{Name: "box-1"},
+		},
 	}
-	if err := r.(*Restarter).Restart(context.Background(), composeApp()); err != nil {
-		t.Fatal(err)
-	}
+
+	t.Run("runner error", func(t *testing.T) {
+		t.Parallel()
+		r := &Restarter{Run: func(context.Context, runner.Request) (runner.Result, error) {
+			return runner.Result{}, errors.New("exec failed")
+		}}
+		err := r.Restart(context.Background(), app)
+		if err == nil || !strings.Contains(err.Error(), "docker restart: exec failed") {
+			t.Fatalf("err = %v, want the runner error under the command name", err)
+		}
+	})
+
+	t.Run("stderr when err is empty", func(t *testing.T) {
+		t.Parallel()
+		r := &Restarter{Run: (&fakeExec{respond: func(runner.Request) runner.Result {
+			return runner.Result{Status: runner.StatusFailed, ExitCode: 1, Stderr: []byte("  daemon unreachable  ")}
+		}}).run}
+		err := r.Restart(context.Background(), app)
+		if err == nil || !strings.Contains(err.Error(), "daemon unreachable") {
+			t.Fatalf("err = %v, want the stderr detail", err)
+		}
+	})
+
+	t.Run("status when err and stderr are empty", func(t *testing.T) {
+		t.Parallel()
+		r := &Restarter{Run: (&fakeExec{respond: func(runner.Request) runner.Result {
+			return runner.Result{Status: runner.StatusTimeout, ExitCode: -1}
+		}}).run}
+		err := r.Restart(context.Background(), app)
+		if err == nil || !strings.Contains(err.Error(), "docker restart: timeout") {
+			t.Fatalf("err = %v, want the status detail", err)
+		}
+	})
 }

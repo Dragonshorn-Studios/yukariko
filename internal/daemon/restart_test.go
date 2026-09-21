@@ -15,10 +15,16 @@ type restartRecorder struct {
 	argvs  [][]string
 	fail   bool
 	failAt string
+	// hook runs inside run, after the argv is recorded — tests use it to
+	// cancel the request context mid-bounce.
+	hook func()
 }
 
 func (r *restartRecorder) run(_ context.Context, req runner.Request) (runner.Result, error) {
 	r.argvs = append(r.argvs, req.Argv)
+	if r.hook != nil {
+		r.hook()
+	}
 	if r.fail {
 		return runner.Result{Status: runner.StatusFailed, ExitCode: 1, Err: r.failAt}, nil
 	}
@@ -253,4 +259,40 @@ func TestRestartLockConflictAndFailureEvents(t *testing.T) {
 			t.Fatalf("events = %+v, want a failure event", events)
 		}
 	})
+}
+
+// TestRestartCleansUpAfterCancellation pins the SIGINT path: the request
+// ctx dies mid-bounce, yet the lock row is still released and the failure
+// event still lands — both run under context.WithoutCancel.
+func TestRestartCleansUpAfterCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rec := &restartRecorder{fail: true, failAt: "interrupted", hook: cancel}
+	asm := restartAssemble(t, composeRestartApp("/srv/web"), rec)
+	checkpoint(t, asm.Store, "web", store.KindDigest, "app:1@sha256:keep")
+
+	err := asm.Restart(ctx, "web")
+	if err == nil || !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("err = %v, want the bounce failure", err)
+	}
+
+	bg := context.Background()
+	if open, ok, _ := asm.Store.OpenDeployment(bg, "web"); ok {
+		t.Fatalf("cancelled restart left a running lock row: %+v", open)
+	}
+	events, _ := asm.Store.Events(bg, store.EventsQuery{AppID: "web", Limit: 20})
+	var failed bool
+	for _, e := range events {
+		if e.Kind == EventRestart && e.Level == store.LevelError && strings.Contains(e.Message, "failed") {
+			failed = true
+		}
+	}
+	if !failed {
+		t.Fatalf("events = %+v, want a failure event recorded despite cancellation", events)
+	}
+	got, _, ok, _ := asm.Store.DeployedVersion(bg, "web", store.KindDigest)
+	if !ok || got != "app:1@sha256:keep" {
+		t.Fatalf("checkpoint moved after a cancelled restart: %q", got)
+	}
 }
