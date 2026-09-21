@@ -4,11 +4,12 @@
 // filenames stay sanctuary/vestments/chronicle/divination; visible labels
 // are the user-facing names above.
 //
-// There are no state-changing controls, no forms, and no JavaScript: every
-// page renders from the same read-only query layer the CLI and API use,
-// and the only interactive element is plain links. Pages auto-refresh via
-// a meta refresh so a pass in flight is visible; the Updating chip uses a
-// CSS spinner (static under prefers-reduced-motion).
+// There are no state-changing controls and no forms: every page renders
+// from the same read-only query layer the CLI and API use. A tiny original
+// live.js (progressive enhancement) GETs the same HTML and swaps #main and
+// footer so JS browsers avoid a full reload; the meta refresh remains the
+// no-JS fallback. The Updating chip uses a CSS spinner (static under
+// prefers-reduced-motion).
 //
 // All assets are original to this project (see docs/ASSETS.md): the
 // light lapis lock — canvas, surface, ink, lapis, mirage, rose-gold,
@@ -29,7 +30,7 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 )
 
-//go:embed templates/*.html static/style.css
+//go:embed templates/*.html static/style.css static/live.js
 var files embed.FS
 
 // Server renders the dashboard from the durable store and configuration.
@@ -42,18 +43,27 @@ type Server struct {
 // Handler builds the UI routes, all GET/HEAD-only.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /ui/static/style.css", func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		css, _ := files.ReadFile("static/style.css")
-		w.Write(css)
-	})
+	mux.HandleFunc("GET /ui/static/style.css", s.static("static/style.css", "text/css; charset=utf-8", "public, max-age=3600"))
+	mux.HandleFunc("GET /ui/static/live.js", s.static("static/live.js", "text/javascript; charset=utf-8", "public, max-age=300"))
 	mux.HandleFunc("GET /ui", s.page("sanctuary"))
 	mux.HandleFunc("GET /ui/", s.page("sanctuary"))
 	mux.HandleFunc("GET /ui/vestments", s.page("vestments"))
 	mux.HandleFunc("GET /ui/chronicle", s.page("chronicle"))
 	mux.HandleFunc("GET /ui/divination", s.page("divination"))
 	return mux
+}
+
+func (s *Server) static(name, contentType, cache string) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", cache)
+		data, err := files.ReadFile(name)
+		if err != nil {
+			http.NotFound(w, req)
+			return
+		}
+		w.Write(data)
+	}
 }
 
 func (s *Server) now() time.Time {
@@ -114,6 +124,7 @@ func (s *Server) page(section string) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'")
 		data := s.data(req, section)
 		if err := tmpl.ExecuteTemplate(w, "layout.html", data); err != nil {
 			// Headers may already be written; log-free minimal fallback.

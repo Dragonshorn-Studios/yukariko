@@ -138,7 +138,7 @@ func TestDashboardGoldenFragments(t *testing.T) {
 	}
 }
 
-func TestDashboardNoScriptAndReadOnly(t *testing.T) {
+func TestDashboardReadOnlyAndWorksWithoutJS(t *testing.T) {
 	t.Parallel()
 	_, srv := uiServer(t, time.Now())
 	for _, route := range []string{"/ui", "/ui/vestments", "/ui/chronicle", "/ui/divination"} {
@@ -148,11 +148,20 @@ func TestDashboardNoScriptAndReadOnly(t *testing.T) {
 		}
 		body := strings.ToLower(readAll(resp))
 		resp.Body.Close()
-		if strings.Contains(body, "<script") {
-			t.Errorf("%s contains JavaScript; the dashboard must work with JS disabled", route)
-		}
 		if strings.Contains(body, "<form") {
 			t.Errorf("%s contains a form; the dashboard is read-only", route)
+		}
+		if !strings.Contains(body, `src="/ui/static/live.js"`) {
+			t.Errorf("%s missing the live.js progressive enhancement", route)
+		}
+		if strings.Count(body, "<script") != 1 {
+			t.Errorf("%s should have exactly one script tag, got a page that may pull extra JS", route)
+		}
+		if strings.Contains(body, "http://") || strings.Contains(body, "https://") {
+			// layout has no third-party URLs; allow none in the document.
+			if strings.Contains(body, "cdn.") || strings.Contains(body, "unpkg") || strings.Contains(body, "jsdelivr") {
+				t.Errorf("%s pulls a third-party script host", route)
+			}
 		}
 	}
 	resp, err := http.Post(srv.URL+"/ui", "text/plain", nil)
@@ -316,5 +325,50 @@ func TestUpdatingChipAndLiveRefresh(t *testing.T) {
 	}
 	if !strings.Contains(idle("/ui/chronicle"), "Updating") {
 		t.Error("logs should mark a running deployment as Updating")
+	}
+}
+
+func TestLiveJSProgressiveEnhancement(t *testing.T) {
+	t.Parallel()
+	_, srv := uiServer(t, time.Now())
+	resp, err := http.Get(srv.URL + "/ui/static/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("live.js = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(resp.Header.Get("Content-Type"), "javascript") {
+		t.Errorf("live.js Content-Type = %q", resp.Header.Get("Content-Type"))
+	}
+	js := readAll(resp)
+	for _, want := range []string{
+		"docs/ASSETS.md",
+		`fetch(`,
+		`"#main"`,
+		`meta[http-equiv="refresh"]`,
+		"credentials: \"same-origin\"",
+	} {
+		if !strings.Contains(js, want) {
+			t.Errorf("live.js missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"eval(", "Function(", "innerHTML = fetch", "XMLHttpRequest", "http://", "https://"} {
+		if strings.Contains(js, forbidden) {
+			t.Errorf("live.js contains %q", forbidden)
+		}
+	}
+	page, err := http.Get(srv.URL + "/ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Body.Close()
+	html := readAll(page)
+	if !strings.Contains(html, `http-equiv="refresh"`) {
+		t.Error("HTML must keep meta refresh as the no-JS fallback")
+	}
+	if !strings.Contains(page.Header.Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Error("HTML should lock scripts to same-origin")
 	}
 }

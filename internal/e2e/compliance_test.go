@@ -72,10 +72,11 @@ func TestRepositoryHasNoSecrets(t *testing.T) {
 
 func TestAssetsAreOriginalAndInventoried(t *testing.T) {
 	t.Parallel()
-	// The only static assets are the dashboard stylesheet; the dashboard is
-	// typography and CSS with no third-party material of any kind.
+	// The only static assets are the dashboard stylesheet and the original
+	// live.js progressive-enhancement script; no third-party material.
 	allowed := map[string]bool{
 		"style.css": true,
+		"live.js":   true,
 	}
 	err := filepath.Walk("../../internal/ui", func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -97,7 +98,7 @@ func TestAssetsAreOriginalAndInventoried(t *testing.T) {
 		t.Fatal("docs/ASSETS.md must exist")
 	}
 	lower := strings.ToLower(string(assets))
-	for _, must := range []string{"original", "style.css", "mai-hime"} {
+	for _, must := range []string{"original", "style.css", "live.js", "mai-hime"} {
 		// "mai-hime" must appear only in the exclusion statement — the
 		// document asserts no third-party or copyrighted theme assets.
 		if !strings.Contains(lower, must) {
