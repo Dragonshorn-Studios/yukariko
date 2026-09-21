@@ -125,7 +125,7 @@ func TestDashboardGoldenFragments(t *testing.T) {
 		t.Error("status overview still shows liturgical Sanctuary chrome")
 	}
 	vestments := get("/ui/vestments")
-	for _, want := range []string{"app:1", "sha256:abcd", "Synced"} {
+	for _, want := range []string{"app:1", "sha256:abcd", "Pending update"} {
 		if !strings.Contains(vestments, want) {
 			t.Errorf("versions missing %q", want)
 		}
