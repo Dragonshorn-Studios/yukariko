@@ -71,7 +71,12 @@
         return res.text();
       })
       .then(apply)
-      .catch(function () {})
+      .catch(function () {
+        /* A failed refresh usually means the session expired (or the page
+           moved): the jump to sign-in completes only as a navigation, so
+           fall back to a full load instead of staling quietly. */
+        window.location.assign(path());
+      })
       .then(arm);
   }
 

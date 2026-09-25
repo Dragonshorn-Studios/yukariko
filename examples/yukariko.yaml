@@ -15,6 +15,21 @@ server:
   enabled: false
   bind: 127.0.0.1:8484
 
+# Optional OIDC login gate for the dashboard and API (issue #61). Requires
+# server.enabled; the issuer and the external origin must be https, and the
+# redirect URI registered with the provider is <redirect_base>/auth/callback.
+# Peer reports keep their own HMAC channel and are never session-gated.
+# auth:
+#   oidc:
+#     enabled: true
+#     issuer: https://auth.example.com/application/o/yukariko/
+#     client_id: yukariko
+#     client_secret_ref:
+#       env: YUKARIKO_OIDC_CLIENT_SECRET
+#     redirect_base: https://yukariko.example.com
+#     allowed_groups: [yukariko-admins]   # optional; empty = provider policy decides
+#     session_ttl: 12h
+
 # Optional peer status reporting. Reports carry status only, never commands.
 reporting:
   outbound:

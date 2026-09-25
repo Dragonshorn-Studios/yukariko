@@ -5,8 +5,10 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -36,6 +38,7 @@ func (c *Config) Validate() error {
 	}
 	validateDockerEndpoint(v, "docker", c.Docker)
 	validateReporting(v, &c.Reporting)
+	validateAuth(v, c)
 
 	seenIDs := make(map[string]bool, len(c.Apps))
 	seenTargets := make(map[string]string)
@@ -364,6 +367,65 @@ func validateReporting(v *validator, r *Reporting) {
 		}
 		if i.RateLimit.Events < 1 {
 			v.errorf(ip+".rate_limit.events", "must be at least 1")
+		}
+	}
+}
+
+// validateAuth enforces the fail-closed rules of the optional OIDC gate
+// (issue #61): an enabled gate must have a listener to protect, an issuer,
+// a client identity, a secret reference, and the external origin browsers
+// actually reach. Issuer and origin must be https (loopback http is a test
+// affordance), mirroring the reporting credential-leak doctrine.
+func validateAuth(v *validator, c *Config) {
+	o := &c.Auth.OIDC
+	if !o.Enabled {
+		return
+	}
+	p := "auth.oidc"
+	if !c.Server.Enabled {
+		v.errorf(p+".enabled", "requires server.enabled so there is a listener to protect; refusing a half-configured gate")
+	}
+	if o.Issuer == "" {
+		v.errorf(p+".issuer", "is required when oidc authentication is enabled")
+	} else {
+		u, err := url.Parse(o.Issuer)
+		if err != nil || u.Host == "" {
+			v.errorf(p+".issuer", "must be an absolute URL (the exact issuer the provider reports), got %q", o.Issuer)
+		} else if u.Scheme != "https" && !isLoopbackHost(u) {
+			v.errorf(p+".issuer", "must use https (plain http is allowed only on loopback hosts for tests), got %q", u.Scheme)
+		}
+	}
+	if o.ClientID == "" {
+		v.errorf(p+".client_id", "is required when oidc authentication is enabled")
+	}
+	if o.ClientSecretRef == nil {
+		v.errorf(p+".client_secret_ref", "is required when oidc authentication is enabled; secrets are references only and literal values are rejected")
+	} else {
+		validateSecretRef(v, p+".client_secret_ref", o.ClientSecretRef)
+	}
+	if o.RedirectBase == "" {
+		v.errorf(p+".redirect_base", "is required when oidc authentication is enabled; it is the external origin browsers reach (redirect URI is <redirect_base>/auth/callback)")
+	} else {
+		u, err := url.Parse(o.RedirectBase)
+		if err != nil || u.Host == "" {
+			v.errorf(p+".redirect_base", "must be an absolute origin (scheme://host[:port]), got %q", o.RedirectBase)
+		} else if u.Scheme != "https" && !isLoopbackHost(u) {
+			v.errorf(p+".redirect_base", "must use https (plain http is allowed only on loopback hosts for tests), got %q", u.Scheme)
+		} else if (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+			v.errorf(p+".redirect_base", "must be a bare origin without path, query, or fragment, got %q", o.RedirectBase)
+		}
+	}
+	// Validation runs after ApplyDefaults, so unset scopes are already the
+	// openid-carrying defaults; a user-set list must still include openid.
+	if !slices.Contains(o.Scopes, "openid") {
+		v.errorf(p+".scopes", "must include %q, got %v", "openid", o.Scopes)
+	}
+	if ttl := o.SessionTTL.D(); ttl < time.Minute || ttl > 30*24*time.Hour {
+		v.errorf(p+".session_ttl", "must be between 1m and 720h")
+	}
+	for i, g := range o.AllowedGroups {
+		if g == "" {
+			v.errorf(fmt.Sprintf("%s.allowed_groups[%d]", p, i), "must not be empty")
 		}
 	}
 }

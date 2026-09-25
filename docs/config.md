@@ -253,6 +253,42 @@ a receiver host must also set `server.enabled: true` (and `server.bind` to
 a reachable address) — `yukariko run` refuses to start an inbound listener
 with no configured address rather than bind a random port.
 
+## Authentication
+
+```yaml
+auth:
+  oidc:
+    enabled: false
+    issuer: https://auth.example.com/application/o/yukariko/
+    client_id: yukariko
+    client_secret_ref: {env: YUKARIKO_OIDC_CLIENT_SECRET}
+    redirect_base: https://yukariko.example.com   # external origin, no path
+    scopes: [openid, profile, email]              # default when unset
+    allowed_groups: []                            # optional; empty = provider policy decides
+    session_ttl: 12h                              # 1m..720h
+```
+
+Optional but strong (issue #61). When enabled, the dashboard (`/ui`) and the
+read-only API (`/api/v1`) sit behind an OpenID Connect login: authorization
+code + PKCE, ID tokens verified in-binary (signature, issuer, audience,
+expiry, nonce) via go-oidc. Any compliant provider works; Authentik is the
+documented instance — see the operations guide for provider setup and the
+reverse-proxy TLS layout. Sessions are server-side rows in the data dir; the
+cookie carries only a random token whose hash is stored, so a database copy
+cannot resurrect sessions. `redirect_base` is the origin browsers actually
+reach (the redirect URI is `<redirect_base>/auth/callback`) and must be
+https like the issuer — plain http is a loopback test affordance.
+
+`allowed_groups` is defense in depth: when non-empty, Yukariko itself
+default-denies any verified login whose `groups` claim does not intersect
+the list (a missing claim satisfies nothing), regardless of how the
+provider's application policy is bound. `client_secret_ref` follows the
+secret rules above (env or file, resolved only at token exchange, never
+logged or stored). Enabling the gate requires `server.enabled: true` —
+`yukariko run` refuses a half-configured listener. The peer report channel
+(`/report/v1/events`) is never session-gated; it keeps its own HMAC
+authentication.
+
 ## Validation summary
 
 Rejected with path-aware errors: unknown/duplicate fields, unsupported or
@@ -261,6 +297,10 @@ relative work dirs/paths, duplicate app IDs, duplicate step names within a
 list, two apps sharing a deploy target, invalid image refs/ports/binds,
 bad probe status ranges, literal secrets (they are not representable),
 reporting configuration that enables itself without the required identity
-and key references, and Docker endpoints setting both `context` and `host`
+and key references, an `auth.oidc` section that enables itself without
+`server.enabled`, an issuer, a client id, a secret reference, or an external
+`redirect_base` (or that carries non-https origins off loopback, origins
+with a path, scopes without `openid`, a `session_ttl` outside 1m–720h, or
+empty group names), and Docker endpoints setting both `context` and `host`
 or carrying a host without a `unix://`, `tcp://`, `ssh://`, or `npipe://`
 scheme.

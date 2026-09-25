@@ -235,3 +235,40 @@ func TestAssembleBuildsAPIWhenEnabled(t *testing.T) {
 		t.Errorf("API = %+v bind = %q, want the read-only server wired", asm.API, asm.APIBind)
 	}
 }
+
+func TestAssembleBuildsAuthenticatorWhenEnabled(t *testing.T) {
+	t.Parallel()
+	newCfg := func(auth config.Auth) *config.Config {
+		return &config.Config{
+			SchemaVersion: 1,
+			Server:        config.Server{Enabled: true},
+			Auth:          auth,
+		}
+	}
+	enabled := config.Auth{OIDC: config.OIDCAuth{
+		Enabled: true, Issuer: "https://auth.example.com", ClientID: "yukariko",
+		ClientSecretRef: &config.SecretRef{Env: "OIDC_SECRET"},
+		RedirectBase:    "https://yukariko.example.com",
+	}}
+
+	asm, err := Assemble(context.Background(), Options{Config: newCfg(enabled), DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	defer asm.Store.Close()
+	if asm.Authenticator == nil {
+		t.Fatal("Authenticator = nil, want the OIDC gate wired when enabled")
+	}
+	if asm.Authenticator.OIDC.Issuer != "https://auth.example.com" || asm.Authenticator.Store == nil {
+		t.Errorf("Authenticator misconfigured: %+v", asm.Authenticator.OIDC)
+	}
+
+	asm, err = Assemble(context.Background(), Options{Config: newCfg(config.Auth{}), DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Assemble without auth: %v", err)
+	}
+	defer asm.Store.Close()
+	if asm.Authenticator != nil {
+		t.Error("Authenticator != nil, want nil when auth is disabled")
+	}
+}

@@ -77,7 +77,7 @@ Global flags: `--config`, `--data-dir` (default `./data`), `--version`. Exit cod
 
 ## Operations and security
 
-Installation, systemd hardening, upgrades, SQLite backup, private Git/registry auth, reporting key rotation, retention, troubleshooting, and recovery steps: [`docs/operations.md`](docs/operations.md). The threat model, security checklist, and Docker-privilege implications: [`docs/security.md`](docs/security.md) and [`docs/docker-access.md`](docs/docker-access.md). Release builds with checksums: `scripts/build-release.sh <version>`. The end-to-end acceptance suite: `go test -tags e2e ./internal/e2e/`.
+Installation, systemd hardening, upgrades, SQLite backup, private Git/registry auth, reporting key rotation, retention, troubleshooting, and recovery steps: [`docs/operations.md`](docs/operations.md). Publishing the dashboard on an untrusted network behind an OpenID Connect provider (Authentik documented) via the optional `auth.oidc` gate is covered there too. The threat model, security checklist, and Docker-privilege implications: [`docs/security.md`](docs/security.md) and [`docs/docker-access.md`](docs/docker-access.md). Release builds with checksums: `scripts/build-release.sh <version>`. The end-to-end acceptance suite: `go test -tags e2e ./internal/e2e/`.
 
 ## Configuration
 

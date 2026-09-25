@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Dragonshorn-Studios/yukariko/internal/auth"
 	"github.com/Dragonshorn-Studios/yukariko/internal/config"
 	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
@@ -80,7 +81,8 @@ type page struct {
 	Data     any
 	Now      string
 	HostName string
-	Refresh  int // meta-refresh seconds; always set so the view stays live
+	Refresh  int    // meta-refresh seconds; always set so the view stays live
+	AuthUser string // signed-in subject when the OIDC gate wrapped this request (#61)
 }
 
 const (
@@ -141,6 +143,11 @@ func (s *Server) data(req *http.Request, section string) page {
 		Nav:     nav,
 		Now:     s.now().UTC().Format(time.RFC3339),
 		Refresh: refreshIdleSeconds,
+	}
+	// The identity is set only when the optional OIDC gate (#61) verified
+	// this request; without it the footer shows no session line at all.
+	if id, ok := auth.FromContext(req.Context()); ok {
+		p.AuthUser = id.Subject
 	}
 	switch section {
 	case "sanctuary":

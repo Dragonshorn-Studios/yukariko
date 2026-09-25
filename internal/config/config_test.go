@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -898,5 +899,244 @@ apps:
 	}
 	if again.Apps[0].IsEnabled() {
 		t.Error("enabled: false must stay disabled after defaults")
+	}
+}
+
+// validAuthDoc is the minimal valid OIDC gate used by the auth tests.
+const validAuthDoc = `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com/application/o/yukariko/
+    client_id: yukariko
+    client_secret_ref: {env: YUKARIKO_OIDC_CLIENT_SECRET}
+    redirect_base: https://yukariko.example.com
+apps: []
+`
+
+func TestAuthOIDCValidParsesAndDefaults(t *testing.T) {
+	t.Parallel()
+	cfg, err := Parse([]byte(validAuthDoc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	o := cfg.Auth.OIDC
+	if !o.Enabled || o.Issuer == "" || o.ClientID != "yukariko" {
+		t.Fatalf("auth section lost: %+v", o)
+	}
+	if slices.Compare(o.Scopes, DefaultOIDCScopes) != 0 {
+		t.Errorf("default scopes = %v, want %v", o.Scopes, DefaultOIDCScopes)
+	}
+	if o.SessionTTL != DefaultOIDCSessionTTL {
+		t.Errorf("default session_ttl = %v, want %v", o.SessionTTL, DefaultOIDCSessionTTL)
+	}
+	if got, want := o.RedirectURI(), "https://yukariko.example.com/auth/callback"; got != want {
+		t.Errorf("RedirectURI = %q, want %q", got, want)
+	}
+}
+
+func TestAuthOIDCInvalid(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		doc  string
+		want string
+	}{
+		{
+			name: "enabled without server",
+			doc: `
+schema_version: 1
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com
+    client_id: yukariko
+    client_secret_ref: {env: X}
+    redirect_base: https://yukariko.example.com
+apps: []
+`,
+			want: "auth.oidc.enabled: requires server.enabled so there is a listener to protect",
+		},
+		{
+			name: "plain http issuer off loopback",
+			doc: `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: http://auth.lan/application/o/yukariko/
+    client_id: yukariko
+    client_secret_ref: {env: X}
+    redirect_base: https://yukariko.example.com
+apps: []
+`,
+			want: `auth.oidc.issuer: must use https`,
+		},
+		{
+			name: "missing client id",
+			doc: `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com
+    client_secret_ref: {env: X}
+    redirect_base: https://yukariko.example.com
+apps: []
+`,
+			want: "auth.oidc.client_id: is required when oidc authentication is enabled",
+		},
+		{
+			name: "missing secret ref",
+			doc: `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com
+    client_id: yukariko
+    redirect_base: https://yukariko.example.com
+apps: []
+`,
+			want: "auth.oidc.client_secret_ref: is required when oidc authentication is enabled; secrets are references only",
+		},
+		{
+			name: "redirect base with a path",
+			doc: `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com
+    client_id: yukariko
+    client_secret_ref: {env: X}
+    redirect_base: https://example.com/yukariko
+apps: []
+`,
+			want: "auth.oidc.redirect_base: must be a bare origin without path, query, or fragment",
+		},
+		{
+			name: "scopes without openid",
+			doc: `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com
+    client_id: yukariko
+    client_secret_ref: {env: X}
+    redirect_base: https://yukariko.example.com
+    scopes: [profile, email]
+apps: []
+`,
+			want: `auth.oidc.scopes: must include "openid"`,
+		},
+		{
+			name: "session ttl out of bounds",
+			doc: `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com
+    client_id: yukariko
+    client_secret_ref: {env: X}
+    redirect_base: https://yukariko.example.com
+    session_ttl: 10s
+apps: []
+`,
+			want: "auth.oidc.session_ttl: must be between 1m and 720h",
+		},
+		{
+			name: "empty allowed group",
+			doc: `
+schema_version: 1
+server: {enabled: true}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com
+    client_id: yukariko
+    client_secret_ref: {env: X}
+    redirect_base: https://yukariko.example.com
+    allowed_groups: ["", ops]
+apps: []
+`,
+			want: "auth.oidc.allowed_groups[0]: must not be empty",
+		},
+		{
+			name: "unknown auth field rejected",
+			doc: `
+schema_version: 1
+auth:
+  oidc:
+    client_secret: literal
+apps: []
+`,
+			want: "field client_secret not found",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Parse([]byte(tt.doc))
+			if err == nil {
+				t.Fatal("Parse succeeded, want error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error %q\n  does not contain %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestAuthOIDCDisabledSectionIsInert(t *testing.T) {
+	t.Parallel()
+	// A disabled or absent section never demands anything...
+	cfg, err := Parse([]byte("schema_version: 1\nauth:\n  oidc:\n    enabled: false\napps: []\n"))
+	if err != nil {
+		t.Fatalf("Parse of a disabled auth section: %v", err)
+	}
+	if cfg.Auth.OIDC.Enabled {
+		t.Error("auth.oidc must default to disabled")
+	}
+	// ...and rendering (which flows through DecodeRaw, never Parse) never
+	// materializes auth defaults the user did not write.
+	raw, err := DecodeRaw([]byte("schema_version: 1\nauth:\n  oidc:\n    enabled: false\napps: []\n"))
+	if err != nil {
+		t.Fatalf("DecodeRaw: %v", err)
+	}
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, noise := range []string{"scopes:", "session_ttl:", "issuer:", "client_id:"} {
+		if bytes.Contains(out, []byte(noise)) {
+			t.Errorf("rendered document emits unset %s:\n%s", noise, out)
+		}
+	}
+	// A user-written auth section round-trips byte-faithfully in shape.
+	raw, err = DecodeRaw([]byte(validAuthDoc))
+	if err != nil {
+		t.Fatalf("DecodeRaw: %v", err)
+	}
+	out, err = yaml.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	again, err := Parse(out)
+	if err != nil {
+		t.Fatalf("re-Parse: %v\n%s", err, out)
+	}
+	if !again.Auth.OIDC.Enabled || again.Auth.OIDC.ClientID != "yukariko" {
+		t.Errorf("auth round trip changed the section: %+v", again.Auth.OIDC)
 	}
 }
