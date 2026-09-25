@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 
@@ -15,8 +16,9 @@ import (
 // errorPage renders a minimal, self-contained page: no stylesheet (the
 // dashboard assets sit behind the gate this package enforces), no scripts,
 // no inline styles — browser default typography is the entire design.
-// Messages are static strings from this package or the provider's error
-// code; html/template escapes everything.
+// Messages are static strings from this package plus the provider's error
+// code from the callback query, which is request-supplied and untrusted;
+// html/template escapes everything.
 var errorPageTmpl = template.Must(template.New("error").Parse(`<!doctype html>
 <html lang="en">
 <head>
@@ -57,6 +59,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, req *http.Request) {
 
 	prov, _, _, err := s.idp()
 	if err != nil {
+		s.log().Warn("oidc discovery failed at login", "error", err)
 		s.errorPage(w, http.StatusServiceUnavailable, "Sign-in is unavailable",
 			"The identity provider could not be reached. This is a Yukariko-side display; try again in a moment.")
 		return
@@ -74,6 +77,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, req *http.Request) {
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(s.loginTTL()),
 	}); err != nil {
+		s.log().Error("record pending login", "error", err)
 		s.errorPage(w, http.StatusInternalServerError, "Sign-in could not start",
 			"The sign-in state could not be recorded. Try again.")
 		return
@@ -101,6 +105,7 @@ type idClaims struct {
 func (s *Server) handleCallback(w http.ResponseWriter, req *http.Request) {
 	q := req.URL.Query()
 	if e := q.Get("error"); e != "" {
+		s.log().Warn("provider returned an error on the callback", "error_code", e)
 		s.errorPage(w, http.StatusForbidden, "Sign-in was refused",
 			"The identity provider reported: "+e+".")
 		return
@@ -113,6 +118,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, req *http.Request) {
 	}
 	pending, ok, err := s.Store.ConsumePendingAuth(req.Context(), state, s.now())
 	if err != nil {
+		s.log().Error("consume pending login", "error", err)
 		s.errorPage(w, http.StatusInternalServerError, "Sign-in failed",
 			"The sign-in state could not be read. Try again.")
 		return
@@ -126,12 +132,14 @@ func (s *Server) handleCallback(w http.ResponseWriter, req *http.Request) {
 
 	secret, err := s.OIDC.ClientSecretRef.Resolve()
 	if err != nil {
+		s.log().Error("oidc client secret unresolvable", "error", err)
 		s.errorPage(w, http.StatusServiceUnavailable, "Sign-in is unavailable",
 			"The OIDC client secret could not be resolved from its reference. This is a server configuration problem.")
 		return
 	}
 	prov, verifier, _, err := s.idp()
 	if err != nil {
+		s.log().Warn("oidc discovery failed at callback", "error", err)
 		s.errorPage(w, http.StatusServiceUnavailable, "Sign-in is unavailable",
 			"The identity provider could not be reached.")
 		return
@@ -140,34 +148,40 @@ func (s *Server) handleCallback(w http.ResponseWriter, req *http.Request) {
 	cfg := s.oauthConfig(prov, secret)
 	tok, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(pending.CodeVerifier))
 	if err != nil {
+		s.log().Warn("oidc token exchange rejected", "error", err)
 		s.errorPage(w, http.StatusForbidden, "Sign-in failed",
 			"The identity provider rejected the sign-in exchange.")
 		return
 	}
 	rawIDToken, hasIDToken := tok.Extra("id_token").(string)
 	if !hasIDToken {
+		s.log().Warn("oidc token response carried no id_token")
 		s.errorPage(w, http.StatusForbidden, "Sign-in failed",
 			"The identity provider returned no identity token.")
 		return
 	}
 	idToken, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
+		s.log().Warn("oidc id token rejected", "error", err)
 		s.errorPage(w, http.StatusForbidden, "Sign-in failed",
 			"The identity token did not verify (signature, issuer, audience, or expiry).")
 		return
 	}
 	if idToken.Nonce != pending.Nonce {
+		s.log().Warn("oidc nonce mismatch")
 		s.errorPage(w, http.StatusForbidden, "Sign-in failed",
 			"The identity token nonce did not match this sign-in attempt.")
 		return
 	}
 	var cl idClaims
 	if err := idToken.Claims(&cl); err != nil {
+		s.log().Warn("oidc id token claims unreadable", "error", err)
 		s.errorPage(w, http.StatusForbidden, "Sign-in failed",
 			"The identity token's claims could not be read.")
 		return
 	}
 	if !s.groupsAllowed(cl.Groups) {
+		s.log().Warn("oidc group policy denied login", "subject", cl.PreferredUsername, "sub", idToken.Subject)
 		s.errorPage(w, http.StatusForbidden, "Not authorized",
 			"Membership in one of the configured allowed groups is required.")
 		return
@@ -227,13 +241,28 @@ func (s *Server) groupsAllowed(groups []string) bool {
 // form-free contract; the worst case is an annoyance, not exposure.
 func (s *Server) handleLogout(w http.ResponseWriter, req *http.Request) {
 	if c, err := req.Cookie(s.cookieName()); err == nil && c.Value != "" {
-		_ = s.Store.DeleteWebSession(req.Context(), tokenHash(c.Value))
+		if dErr := s.Store.DeleteWebSession(req.Context(), tokenHash(c.Value)); dErr != nil {
+			// The row stays valid until its TTL; the page must not claim
+			// a sign-out the store did not perform.
+			s.log().Error("delete web session on logout", "error", dErr)
+			s.clearCookie(w)
+			s.errorPage(w, http.StatusInternalServerError, "Sign-out did not complete",
+				"The session could not be deleted server-side and remains valid until it expires; try signing out again.")
+			return
+		}
 	}
 	s.clearCookie(w)
 	w.Header().Set("Cache-Control", "no-store")
-	if _, _, end, err := s.idp(); err == nil && end != "" {
+	_, _, end, idpErr := s.idp()
+	if idpErr != nil {
+		s.log().Warn("provider unavailable at logout; redirecting locally", "error", idpErr)
+	}
+	if end != "" {
+		// Same trailing-slash trim as RedirectURI: providers compare this
+		// value as an exact string against their registration.
+		base := strings.TrimRight(s.OIDC.RedirectBase, "/")
 		u := end + "?" + url.Values{
-			"post_logout_redirect_uri": {s.OIDC.RedirectBase + "/ui"},
+			"post_logout_redirect_uri": {base + "/ui"},
 		}.Encode()
 		http.Redirect(w, req, u, http.StatusFound)
 		return

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,7 +38,10 @@ func tokenHash(token string) string {
 }
 
 func (s *Server) secureCookies() bool {
-	return strings.HasPrefix(s.OIDC.RedirectBase, "https:")
+	// Parsed, not prefix-matched: url.Parse lowercases the scheme, so an
+	// uppercase HTTPS origin must not silently downgrade the cookie.
+	u, err := url.Parse(s.OIDC.RedirectBase)
+	return err == nil && u.Scheme == "https"
 }
 
 func (s *Server) cookieName() string {
@@ -79,28 +83,43 @@ func (s *Server) clearCookie(w http.ResponseWriter) {
 }
 
 // sanitizeThen keeps the post-login landing local: an absolute URL, a
-// protocol-relative //host, or an /auth path would turn the redirect into
-// an open redirect or a loop.
+// protocol-relative reference, an /auth path (redirect loop), or any
+// backslash would turn the redirect into an open redirect. WHATWG browsers
+// normalize "\" to "/" in special URLs, so "/\evil.com" reaches
+// "//evil.com" — backslash is never legitimate in a Yukariko path.
 func sanitizeThen(raw string) string {
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.HasPrefix(raw, "/auth") {
+	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") ||
+		strings.HasPrefix(raw, "/auth") || strings.Contains(raw, "\\") {
 		return "/ui"
 	}
 	return raw
 }
 
-// rateWindow is a fixed-window counter (receiver pattern).
+// rateWindow is a fixed-window counter (fixed, not sliding).
 type rateWindow struct {
 	start time.Time
 	count int
 }
 
+// rateWindowMapCap bounds the window table: keys are remote-controlled
+// (transport peers), so the map must not grow monotonically on an
+// internet-exposed listener. Eviction drops closed windows.
+const rateWindowMapCap = 256
+
 func (s *Server) rateLimit(key string) bool {
+	s.winMu.Lock()
+	defer s.winMu.Unlock()
 	if s.windows == nil {
 		s.windows = map[string]*rateWindow{}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	now := s.now()
+	if len(s.windows) >= rateWindowMapCap {
+		for k, w := range s.windows {
+			if now.Sub(w.start) >= loginRatePer {
+				delete(s.windows, k)
+			}
+		}
+	}
 	win := s.windows[key]
 	if win == nil || now.Sub(win.start) >= loginRatePer {
 		win = &rateWindow{start: now}

@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -33,6 +35,42 @@ func TestPendingAuthSingleUse(t *testing.T) {
 	// Unknown state is absent, not an error.
 	if _, ok, err := s.ConsumePendingAuth(ctx, "never-seen", now.Add(time.Second)); err != nil || ok {
 		t.Errorf("unknown consume = ok:%v err:%v, want ok:false err:nil", ok, err)
+	}
+}
+
+// The single-use guarantee must hold under concurrency: two tabs racing
+// the same callback URL (or an attacker replaying it) cannot both consume
+// the state. The atomic DELETE ... RETURNING decides, not the callers.
+func TestConcurrentConsumePendingAuthHasOneWinner(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := s.CreatePendingAuth(ctx, AuthPending{
+		State: "race", Nonce: "n", CodeVerifier: "v", RedirectTo: "/ui",
+		CreatedAt: now, ExpiresAt: now.Add(10 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreatePendingAuth: %v", err)
+	}
+	var winners atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, ok, err := s.ConsumePendingAuth(ctx, "race", now.Add(time.Second))
+			if err != nil {
+				t.Errorf("concurrent consume: %v", err)
+				return
+			}
+			if ok {
+				winners.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := winners.Load(); got != 1 {
+		t.Errorf("concurrent consume produced %d winners, want exactly 1", got)
 	}
 }
 

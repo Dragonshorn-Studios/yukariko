@@ -65,17 +65,24 @@
     }
     fetch(path(), { headers: { Accept: "text/html" }, credentials: "same-origin" })
       .then(function (res) {
+        if (res.status === 401) {
+          /* The session expired: the jump to sign-in completes only as a
+             navigation, not a fetch, so switch to a full page load. */
+          throw { navigate: true };
+        }
         if (!res.ok) {
           throw new Error("live refresh failed");
         }
         return res.text();
       })
       .then(apply)
-      .catch(function () {
-        /* A failed refresh usually means the session expired (or the page
-           moved): the jump to sign-in completes only as a navigation, so
-           fall back to a full load instead of staling quietly. */
-        window.location.assign(path());
+      .catch(function (err) {
+        if (err && err.navigate) {
+          window.location.assign(path());
+          return;
+        }
+        /* Transient failure (restart, network blip): retry quietly on the
+           next tick instead of destroying the page. */
       })
       .then(arm);
   }

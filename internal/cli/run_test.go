@@ -59,6 +59,23 @@ func TestRunListenerGating(t *testing.T) {
 		}
 	})
 
+	t.Run("oidc gate enabled wraps the listener", func(t *testing.T) {
+		secretFile := filepath.Join(t.TempDir(), "oidc.secret")
+		if err := os.WriteFile(secretFile, []byte("test-secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg := writeCfg(t, "schema_version: 1\nserver:\n  enabled: true\nauth:\n  oidc:\n    enabled: true\n    issuer: https://auth.example.com/application/o/yukariko/\n    client_id: yukariko\n    client_secret_ref: {file: "+secretFile+"}\n    redirect_base: https://yukariko.example.com\napps: []\n")
+		out, _, err := runRun(t, cfg)
+		if err != nil && !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("run = %v", err)
+		}
+		// Pinning the Protect wiring: without this branch the dashboard and
+		// API would ship ungated while every other test still passes.
+		if !strings.Contains(out, "auth: oidc enabled (issuer https://auth.example.com/application/o/yukariko/") {
+			t.Fatalf("expected the auth wiring line in run output:\n%s", out)
+		}
+	})
+
 	t.Run("inbound reporting without the server section fails closed", func(t *testing.T) {
 		keyFile := filepath.Join(t.TempDir(), "report.key")
 		if err := os.WriteFile(keyFile, []byte("shared-reporting-secret"), 0o600); err != nil {

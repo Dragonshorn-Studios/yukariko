@@ -13,6 +13,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -28,8 +31,6 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
 	"github.com/Dragonshorn-Studios/yukariko/internal/ui"
-	"net/http"
-	"os"
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
@@ -274,7 +275,7 @@ func authenticatorFor(cfg *config.Config, st *store.Store) *auth.Server {
 	if !cfg.Auth.OIDC.Enabled {
 		return nil
 	}
-	return &auth.Server{OIDC: cfg.Auth.OIDC, Store: st}
+	return &auth.Server{OIDC: cfg.Auth.OIDC, Store: st, Log: slog.Default()}
 }
 
 // --- source checking --------------------------------------------------------

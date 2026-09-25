@@ -350,8 +350,10 @@ func TestLiveJSProgressiveEnhancement(t *testing.T) {
 		`"#main"`,
 		`meta[http-equiv="refresh"]`,
 		"credentials: \"same-origin\"",
-		// Expired sessions fall back to a full navigation (#61): the
-		// sign-in redirect only completes as a document load, not a fetch.
+		// Expired sessions fall back to a full navigation (#61), but only
+		// on the gate's designed 401 signal — transient failures keep the
+		// quiet in-place retry so a network blip cannot destroy the page.
+		"res.status === 401",
 		"window.location.assign(",
 	} {
 		if !strings.Contains(js, want) {
@@ -411,7 +413,9 @@ func TestFooterSessionLine(t *testing.T) {
 	if !strings.Contains(body, `href="/auth/logout"`) {
 		t.Error("footer missing the sign-out link under the gate")
 	}
-	// The session line never appears on the login-exempt static assets.
+	// Static assets are files, not templates — the session line can never
+	// render into them (and under the gate they are protected like every
+	// other /ui path).
 	resp, err = http.Get(gated.URL + "/ui/static/live.js")
 	if err != nil {
 		t.Fatal(err)

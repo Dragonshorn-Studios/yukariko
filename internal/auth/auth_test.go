@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -48,6 +49,9 @@ type fakeIdP struct {
 	// nonce, groups, ...). nil = the well-behaved default.
 	tokenHook func(claims map[string]any, state, nonce string)
 	useOther  bool
+	// omitIDToken exercises the fail-closed branch for providers that
+	// return no id_token in the token response.
+	omitIDToken bool
 }
 
 func newFakeIdP(t *testing.T) *fakeIdP {
@@ -170,19 +174,24 @@ func (f *fakeIdP) token(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "sign", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{
-		"access_token": "at", "token_type": "Bearer", "expires_in": 3600, "id_token": raw,
-	})
+	resp := map[string]any{
+		"access_token": "at", "token_type": "Bearer", "expires_in": 3600,
+	}
+	if !f.omitIDToken {
+		resp["id_token"] = raw
+	}
+	writeJSON(w, resp)
 }
 
 // harness wires a real store, the auth server, and a CLI-shaped root mux
 // (ui + api + report + auth behind Protect) exactly like the daemon does.
 type harness struct {
-	srv   *Server
-	ts    *httptest.Server
-	idp   *fakeIdP
-	store *store.Store
-	clock *fakeClock
+	srv        *Server
+	ts         *httptest.Server
+	idp        *fakeIdP
+	store      *store.Store
+	clock      *fakeClock
+	secretPath string
 }
 
 type fakeClock struct{ now time.Time }
@@ -215,7 +224,8 @@ func newHarness(t *testing.T, mutate func(o *config.OIDCAuth), idp *fakeIdP) *ha
 	if mutate != nil {
 		mutate(&o)
 	}
-	srv := &Server{OIDC: o, Store: st, Now: clock.Now}
+	srv := &Server{OIDC: o, Store: st, Now: clock.Now,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ui", func(w http.ResponseWriter, req *http.Request) {
@@ -235,7 +245,7 @@ func newHarness(t *testing.T, mutate func(o *config.OIDCAuth), idp *fakeIdP) *ha
 	ts := httptest.NewServer(srv.Protect(mux))
 	t.Cleanup(ts.Close)
 	srv.OIDC.RedirectBase = ts.URL
-	return &harness{srv: srv, ts: ts, idp: idp, store: st, clock: clock}
+	return &harness{srv: srv, ts: ts, idp: idp, store: st, clock: clock, secretPath: secretPath}
 }
 
 // noRedirect never follows a redirect, so each hop is assertable.
@@ -245,19 +255,26 @@ func noRedirect() *http.Client {
 	}
 }
 
-// login walks the full flow and returns the session cookie plus the
-// authorize URL it passed through.
+// login walks the full flow from /ui and returns the session cookie plus
+// the authorize URL it passed through.
 func (h *harness) login(t *testing.T) (*http.Cookie, *url.URL) {
+	t.Helper()
+	return h.loginFrom(t, "/ui")
+}
+
+// loginFrom walks the full flow starting at an arbitrary dashboard path and
+// asserts the post-login landing is exactly that path.
+func (h *harness) loginFrom(t *testing.T, entry string) (*http.Cookie, *url.URL) {
 	t.Helper()
 	client := noRedirect()
 
-	res, err := client.Get(h.ts.URL + "/ui")
+	res, err := client.Get(h.ts.URL + entry)
 	if err != nil {
-		t.Fatalf("GET /ui: %v", err)
+		t.Fatalf("GET %s: %v", entry, err)
 	}
 	res.Body.Close()
 	if res.StatusCode != http.StatusFound {
-		t.Fatalf("GET /ui = %d, want 302 to login", res.StatusCode)
+		t.Fatalf("GET %s = %d, want 302 to login", entry, res.StatusCode)
 	}
 	loginURL := res.Header.Get("Location")
 
@@ -294,14 +311,47 @@ func (h *harness) login(t *testing.T) (*http.Cookie, *url.URL) {
 		t.Fatalf("GET callback = %d (%s), want 302 to destination", res.StatusCode, body)
 	}
 	res.Body.Close()
-	if loc := res.Header.Get("Location"); loc != "/ui" {
-		t.Errorf("callback redirect = %q, want /ui", loc)
+	if loc := res.Header.Get("Location"); loc != sanitizeThen(entry) {
+		t.Errorf("callback redirect = %q, want %q", loc, sanitizeThen(entry))
 	}
 	cookies := res.Cookies()
 	if len(cookies) != 1 {
 		t.Fatalf("callback set %d cookies, want 1", len(cookies))
 	}
 	return cookies[0], authURL
+}
+
+// walkToCallback drives the redirect chain from a dashboard entry up to
+// (but not including) the callback, so tests can finish it on their own
+// terms.
+func (h *harness) walkToCallback(t *testing.T, entry string) string {
+	t.Helper()
+	client := noRedirect()
+	res, err := client.Get(h.ts.URL + entry)
+	if err != nil {
+		t.Fatalf("GET %s: %v", entry, err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusFound {
+		t.Fatalf("GET %s = %d, want 302 to login", entry, res.StatusCode)
+	}
+	res, err = client.Get(h.ts.URL + res.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusFound {
+		t.Fatalf("login = %d, want 302 to provider", res.StatusCode)
+	}
+	res, err = client.Get(res.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusFound {
+		t.Fatalf("authorize = %d, want 302 to callback", res.StatusCode)
+	}
+	return res.Header.Get("Location")
 }
 
 func drain(res *http.Response) string {
@@ -672,10 +722,8 @@ func TestLogoutDropsSession(t *testing.T) {
 func TestProviderDownSurfacesAtLogin(t *testing.T) {
 	t.Parallel()
 	idp := newFakeIdP(t)
-	url := idp.ts.URL
 	idp.ts.Close() // provider unreachable from the start
 	h := newHarness(t, nil, idp)
-	_ = url
 	client := noRedirect()
 
 	res, err := client.Get(h.ts.URL + "/auth/login")
@@ -753,6 +801,12 @@ func TestSanitizeThen(t *testing.T) {
 		{"/ui?app=web", "/ui?app=web"},
 		{"https://evil.example.com", "/ui"},
 		{"//evil.example.com", "/ui"},
+		// WHATWG browsers normalize "\" to "/" in special URLs, so both
+		// backslash shapes below are protocol-relative redirects to
+		// evil.example.com, not local paths.
+		{`/\evil.example.com`, "/ui"},
+		{`\/evil.example.com`, "/ui"},
+		{`/ui\vestments`, "/ui"},
 		{"/auth/callback", "/ui"},
 		{"/auth", "/ui"},
 		{"relative", "/ui"},
@@ -780,5 +834,200 @@ func TestErrorPageIsEscapedAndStrict(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;script&gt;") {
 		t.Errorf("error page does not escape payload: %s", body)
+	}
+}
+
+// TestCallbackFailClosedBranches pins the callback's failure branches:
+// each renders a generic page and — critically — leaves no session cookie.
+func TestCallbackFailClosedBranches(t *testing.T) {
+	t.Run("provider error parameter", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, nil, nil)
+		res, err := noRedirect().Get(h.ts.URL + "/auth/callback?error=access_denied&error_description=%3Cscript%3E")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Errorf("error param = %d, want 403", res.StatusCode)
+		}
+		body := drain(res)
+		if !strings.Contains(body, "access_denied") {
+			t.Errorf("error param not reported: %s", body)
+		}
+		if strings.Contains(body, "<script>") {
+			t.Errorf("error param reflected unescaped: %s", body)
+		}
+		if len(res.Cookies()) != 0 {
+			t.Error("error param must not set a session cookie")
+		}
+	})
+	t.Run("missing state", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, nil, nil)
+		res, err := noRedirect().Get(h.ts.URL + "/auth/callback?code=x")
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("missing state = %d, want 400", res.StatusCode)
+		}
+	})
+	t.Run("missing code", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, nil, nil)
+		res, err := noRedirect().Get(h.ts.URL + "/auth/callback?state=x")
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("missing code = %d, want 400", res.StatusCode)
+		}
+	})
+	t.Run("unresolvable client secret", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, nil, nil)
+		h.srv.OIDC.ClientSecretRef = &config.SecretRef{File: filepath.Join(t.TempDir(), "missing")}
+		callback := h.walkToCallback(t, "/ui")
+		res, err := noRedirect().Get(callback)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("unresolvable secret = %d (%s), want 503", res.StatusCode, drain(res))
+		}
+		if len(res.Cookies()) != 0 {
+			t.Error("unresolvable secret must not set a session cookie")
+		}
+	})
+	t.Run("wrong client secret value", func(t *testing.T) {
+		t.Parallel()
+		h := newHarness(t, nil, nil)
+		if err := os.WriteFile(h.secretPath, []byte("wrong-value"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		callback := h.walkToCallback(t, "/ui")
+		res, err := noRedirect().Get(callback)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Errorf("wrong secret = %d (%s), want 403 at the exchange", res.StatusCode, drain(res))
+		}
+		if len(res.Cookies()) != 0 {
+			t.Error("rejected exchange must not set a session cookie")
+		}
+	})
+	t.Run("token response without id_token", func(t *testing.T) {
+		t.Parallel()
+		idp := newFakeIdP(t)
+		idp.omitIDToken = true
+		h := newHarness(t, nil, idp)
+		callback := h.walkToCallback(t, "/ui")
+		res, err := noRedirect().Get(callback)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusForbidden {
+			t.Errorf("no id_token = %d (%s), want 403", res.StatusCode, drain(res))
+		}
+		if len(res.Cookies()) != 0 {
+			t.Error("missing id_token must not set a session cookie")
+		}
+	})
+}
+
+func TestDeepLinkLandsBack(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, nil, nil)
+	// loginFrom asserts the post-login redirect equals the entry exactly.
+	h.loginFrom(t, "/ui/vestments?app=web")
+}
+
+func TestSubjectFallsBackToTokenSubject(t *testing.T) {
+	t.Parallel()
+	idp := newFakeIdP(t)
+	idp.tokenHook = func(claims map[string]any, _, _ string) {
+		delete(claims, "preferred_username")
+	}
+	h := newHarness(t, nil, idp)
+	cookie, _ := h.login(t)
+	req, _ := http.NewRequest(http.MethodGet, h.ts.URL+"/ui", nil)
+	req.AddCookie(cookie)
+	res, err := h.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if body := drain(res); body != "ok user-1" {
+		t.Errorf("dashboard body = %q, want the token subject fallback", body)
+	}
+}
+
+// A failing session store must answer 503, never a login redirect: the
+// login cannot succeed against the same broken store.
+func TestStoreFailureAnswersServiceUnavailable(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, nil, nil)
+	cookie, _ := h.login(t)
+	if err := h.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, h.ts.URL+"/ui", nil)
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.AddCookie(cookie)
+	res, err := noRedirect().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("closed store = %d, want 503", res.StatusCode)
+	}
+	if res.Header.Get("Retry-After") == "" {
+		t.Error("503 without Retry-After")
+	}
+}
+
+// Concurrent first logins exercise the rate limiter's lazy state and the
+// provider's lazy construction together (the -race gate owns the verdict).
+func TestConcurrentLoginsInitializeStateSafely(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, nil, nil)
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := noRedirect().Get(h.ts.URL + "/auth/login")
+			if err != nil {
+				t.Errorf("concurrent login: %v", err)
+				return
+			}
+			res.Body.Close()
+			if res.StatusCode != http.StatusFound {
+				t.Errorf("concurrent login = %d, want 302", res.StatusCode)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// The cookie scheme check parses the origin instead of prefix-matching,
+// so an uppercase HTTPS origin cannot silently downgrade to a plain,
+// non-Secure cookie.
+func TestSecureCookiesParseSchemeNotPrefix(t *testing.T) {
+	t.Parallel()
+	s := &Server{OIDC: config.OIDCAuth{RedirectBase: "HTTPS://yukariko.example.com"}}
+	if !s.secureCookies() {
+		t.Error("uppercase HTTPS origin must keep Secure cookies")
+	}
+	if s.cookieName() != secureCookieName {
+		t.Errorf("cookie name = %q, want %q", s.cookieName(), secureCookieName)
 	}
 }

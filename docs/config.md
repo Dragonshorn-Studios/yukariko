@@ -271,7 +271,8 @@ auth:
 Optional but strong (issue #61). When enabled, the dashboard (`/ui`) and the
 read-only API (`/api/v1`) sit behind an OpenID Connect login: authorization
 code + PKCE, ID tokens verified in-binary (signature, issuer, audience,
-expiry, nonce) via go-oidc. Any compliant provider works; Authentik is the
+expiry via go-oidc; nonce compared by Yukariko against the single-use
+login state). Any compliant provider works; Authentik is the
 documented instance — see the operations guide for provider setup and the
 reverse-proxy TLS layout. Sessions are server-side rows in the data dir; the
 cookie carries only a random token whose hash is stored, so a database copy

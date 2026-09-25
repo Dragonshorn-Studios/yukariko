@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -54,12 +55,20 @@ func FromContext(ctx context.Context) (Identity, bool) {
 
 // Server is the OIDC gate: session middleware plus the /auth handlers.
 type Server struct {
+	// OIDC is the validated gate configuration. It is read at request
+	// time; do not mutate it after the first use — the cached verifier
+	// snapshots ClientID at discovery.
 	OIDC config.OIDCAuth
 	// Store persists sessions and single-use login state.
 	Store *store.Store
-	// HTTPClient is used for discovery and token exchange; nil = a client
-	// with a 30s timeout.
+	// HTTPClient is used for discovery, token exchange, and JWKS key
+	// refresh (the provider's key set fetches ride this client for the
+	// process lifetime); nil = a client with a 30s timeout.
 	HTTPClient *http.Client
+	// Log receives failure diagnostics (never secret-adjacent content);
+	// nil falls back to slog.Default(). Client-facing messages stay
+	// generic on purpose — this is the operator's only trail.
+	Log *slog.Logger
 	// Now is injectable for tests.
 	Now func() time.Time
 
@@ -70,7 +79,21 @@ type Server struct {
 	provider  *oidc.Provider
 	verifier  *oidc.IDTokenVerifier
 	endLogout string
-	windows   map[string]*rateWindow
+	// Negative cache for discovery: while the provider is unreachable,
+	// retrying at most once per backoff keeps a hanging discovery from
+	// serializing every login behind the mutex.
+	lastFail    time.Time
+	lastFailErr error
+
+	winMu   sync.Mutex
+	windows map[string]*rateWindow
+}
+
+func (s *Server) log() *slog.Logger {
+	if s.Log != nil {
+		return s.Log
+	}
+	return slog.Default()
 }
 
 // pendingWindow is how long a login attempt stays valid between the
@@ -125,11 +148,21 @@ func noStore(next http.Handler) http.Handler {
 
 // Protect gates the dashboard and API behind the session. Only /ui and /api
 // are protected: /auth carries its own handlers and /report keeps its
-// independent HMAC authentication (machine peers, not browsers).
+// independent HMAC authentication (machine peers, not browsers). A failing
+// session store answers 503 instead of a login redirect — the login cannot
+// succeed against the same broken store, so the redirect would be a lie.
 func (s *Server) Protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if isProtected(req.URL.Path) {
-			if id, ok := s.identity(req); ok {
+			id, ok, err := s.identity(req)
+			if err != nil {
+				s.log().Error("web session store unavailable", "error", err)
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Retry-After", "30")
+				http.Error(w, "authentication backend unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if ok {
 				next.ServeHTTP(w, req.WithContext(WithIdentity(req.Context(), id)))
 				return
 			}
@@ -151,6 +184,7 @@ func isProtected(path string) bool {
 // full navigation, which then lands on the provider.
 func (s *Server) reject(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if isAPIPath(req.URL.Path) || !isNavigation(req) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -175,23 +209,33 @@ func isNavigation(req *http.Request) bool {
 }
 
 // identity resolves the request's session cookie to a verified identity.
-func (s *Server) identity(req *http.Request) (Identity, bool) {
+// A store error is returned to the caller (store doctrine: never treat a
+// database error as "no session"); unreadable claims fail closed as
+// unauthenticated with a warning — that is a store-health signal, not an
+// auth verdict.
+func (s *Server) identity(req *http.Request) (Identity, bool, error) {
 	c, err := req.Cookie(s.cookieName())
 	if err != nil || c.Value == "" {
-		return Identity{}, false
+		return Identity{}, false, nil
 	}
 	hash := tokenHash(c.Value)
 	sess, ok, err := s.Store.WebSession(req.Context(), hash, s.now())
-	if err != nil || !ok {
-		return Identity{}, false
+	if err != nil {
+		return Identity{}, false, err
 	}
-	_ = s.Store.TouchWebSession(req.Context(), hash, s.now())
+	if !ok {
+		return Identity{}, false, nil
+	}
+	if tErr := s.Store.TouchWebSession(req.Context(), hash, s.now()); tErr != nil {
+		s.log().Warn("touch web session", "error", tErr)
+	}
 	var id Identity
 	if err := json.Unmarshal([]byte(sess.Claims), &id); err != nil {
-		return Identity{}, false
+		s.log().Warn("web session claims unreadable; failing closed", "error", err)
+		return Identity{}, false, nil
 	}
 	if id.Subject == "" {
 		id.Subject = sess.Subject
 	}
-	return id, true
+	return id, true, nil
 }
