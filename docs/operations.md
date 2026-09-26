@@ -176,9 +176,19 @@ Authentik side (any compliant OIDC provider works):
    type *Web*.
 2. Redirect URI: `https://yukariko.example.com/auth/callback` (exactly
    `auth.oidc.redirect_base` + `/auth/callback`).
-3. Note the client ID and client secret; put the secret in an env var or
-   a root-readable file and reference it from
-   `auth.oidc.client_secret_ref`.
+3. Note the client ID and client secret; put the secret in an env var or a
+   file and reference it from `auth.oidc.client_secret_ref`. The file must
+   be readable by the service user, not just root — the daemon runs as
+   `yukariko`, so a plain root-owned `600` file fails with "client secret
+   unresolvable … permission denied" in the journal:
+
+   ```bash
+   sudo install -o root -g yukariko -m 640 /dev/null /etc/yukariko/secrets/oidc-client
+   sudo tee /etc/yukariko/secrets/oidc-client >/dev/null   # paste, Ctrl-D
+   sudo -u yukariko cat /etc/yukariko/secrets/oidc-client  # must print it
+   ```
+
+   A trailing newline is fine (the reference reader trims it).
 4. The issuer is the provider's issuer URL Authentik shows (for example
    `https://auth.example.com/application/o/yukariko/`) — use it exactly,
    trailing slash included.
