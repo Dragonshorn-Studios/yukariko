@@ -89,14 +89,24 @@ func (a *App) newRunCommand() *cobra.Command {
 				if asm.ReportHandler != nil {
 					mux.Handle("/report/v1/events", asm.ReportHandler)
 				}
+				var root http.Handler = mux
+				if asm.Authenticator != nil {
+					mux.Handle("/auth/", asm.Authenticator.Handler())
+					// Protect gates /ui and /api; /auth serves the login
+					// flow and /report keeps its own HMAC channel.
+					root = asm.Authenticator.Protect(mux)
+				}
 				ln, err := net.Listen("tcp", asm.APIBind)
 				if err != nil {
 					return fmt.Errorf("bind %s: %w", asm.APIBind, err)
 				}
-				srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+				srv := &http.Server{Handler: root, ReadHeaderTimeout: 5 * time.Second}
 				go func() { _ = srv.Serve(ln) }()
 				defer srv.Close()
 				fmt.Fprintf(out, "listening on %s (dashboard /ui/, API /api/, reports /report/v1/events).\n", asm.APIBind)
+				if asm.Authenticator != nil {
+					fmt.Fprintf(out, "auth: oidc enabled (issuer %s, sessions expire after %s).\n", asm.Authenticator.OIDC.Issuer, asm.Authenticator.OIDC.SessionTTL.D())
+				}
 			}
 			var wg sync.WaitGroup
 			wg.Add(1)

@@ -13,9 +13,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/Dragonshorn-Studios/yukariko/internal/auth"
 	"github.com/Dragonshorn-Studios/yukariko/internal/config"
 	"github.com/Dragonshorn-Studios/yukariko/internal/deploy"
 	"github.com/Dragonshorn-Studios/yukariko/internal/docker"
@@ -27,8 +31,6 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
 	"github.com/Dragonshorn-Studios/yukariko/internal/ui"
-	"net/http"
-	"os"
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
@@ -72,6 +74,10 @@ type Assembled struct {
 	// ReportHandler is non-nil when inbound reporting is enabled; it mounts
 	// at /report/v1/events, separate from the read-only dashboard API.
 	ReportHandler http.Handler
+	// Authenticator is non-nil when the OIDC gate is enabled (issue #61);
+	// the run command wraps the whole root mux with Protect so /ui and /api
+	// require a session while /report keeps its own HMAC channel.
+	Authenticator *auth.Server
 	// Reporter is non-nil when outbound reporting is enabled; the daemon
 	// runs its drain loop and local sinks enqueue through it.
 	Reporter *report.Reporter
@@ -108,6 +114,9 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		HealthDays:      opts.Config.Retention.HealthDays,
 		DeploymentsDays: opts.Config.Retention.DeploymentsDays,
 	}, time.Now())
+	// Drop sessions and pending logins whose TTL passed while the daemon
+	// was down; failures stay non-fatal.
+	_, _ = st.SweepAuth(ctx, time.Now())
 
 	runnerSvc := &runner.Runner{Sink: &commandRunSink{store: st}}
 	cfg := opts.Config
@@ -179,6 +188,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Sink:    &healthSink{store: st, reporter: reporter},
 	}
 	reportHandler := reportHandlerFor(opts.Config, st)
+	authenticator := authenticatorFor(opts.Config, st)
 	uiServer := &ui.Server{Store: st, Config: opts.Config}
 	var api *httpapi.Server
 	apiBind := ""
@@ -206,6 +216,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 
 		ReportHandler: reportHandler,
 		Reporter:      reporter,
+		Authenticator: authenticator,
 	}, nil
 }
 
@@ -254,6 +265,17 @@ func reportHandlerFor(cfg *config.Config, st *store.Store) http.Handler {
 		}
 		return nil, false
 	}, st).Handler()
+}
+
+// authenticatorFor builds the optional OIDC gate when the configuration
+// enables it (issue #61). The client secret stays a SecretRef and resolves
+// only inside the token exchange; the provider is discovered lazily at
+// first login so an unreachable IdP never blocks daemon startup.
+func authenticatorFor(cfg *config.Config, st *store.Store) *auth.Server {
+	if !cfg.Auth.OIDC.Enabled {
+		return nil
+	}
+	return &auth.Server{OIDC: cfg.Auth.OIDC, Store: st, Log: slog.Default()}
 }
 
 // --- source checking --------------------------------------------------------

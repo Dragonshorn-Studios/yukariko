@@ -29,6 +29,7 @@ const CurrentSchemaVersion = 1
 type Config struct {
 	SchemaVersion int             `yaml:"schema_version"`
 	Server        Server          `yaml:"server,omitempty"`
+	Auth          Auth            `yaml:"auth,omitempty"`
 	Reporting     Reporting       `yaml:"reporting,omitempty"`
 	Retention     Retention       `yaml:"retention,omitempty"`
 	Limits        Limits          `yaml:"limits,omitempty"`
@@ -78,7 +79,14 @@ const (
 	DefaultRetentionEvents    = 30                         // days
 	DefaultRetentionHealth    = 14                         // days
 	DefaultRetentionDeploys   = 365                        // days
+
+	// OIDC authentication (issue #61).
+	DefaultOIDCSessionTTL = Duration(12 * time.Hour) // 12h
 )
+
+// DefaultOIDCScopes are requested when the configuration sets none. "openid"
+// is mandatory for an ID token; profile/email carry the display claims.
+var DefaultOIDCScopes = []string{"openid", "profile", "email"}
 
 // Load reads and validates the configuration file at path.
 func Load(path string) (*Config, error) {
@@ -187,6 +195,7 @@ func (c *Config) ApplyDefaults() {
 		c.Limits.CommandOutputBytes = DefaultCommandOutputBytes
 	}
 	c.Reporting.ApplyDefaults()
+	c.Auth.ApplyDefaults()
 	for i := range c.Apps {
 		c.Apps[i].ApplyDefaults()
 	}

@@ -157,6 +157,69 @@ or more `secret_ref` keys. Add the new key alongside the old, redeploy the
 sender, then remove the old key — revocation is immediate. Outbound senders
 resolve their key from `reporting.outbound.secret_ref` at send time.
 
+## Publishing the dashboard (OIDC with Authentik)
+
+By default the HTTP surface binds loopback and carries no authentication.
+To publish it on an untrusted network, put Yukariko behind your own
+TLS-terminating reverse proxy and enable the optional OIDC gate (issue
+#61) so Yukariko itself decides who may read — proxy headers are never
+trusted.
+
+Layout: browsers reach `https://yukariko.example.com` (your proxy, with a
+certificate); the proxy forwards to `server.bind`
+(`127.0.0.1:8484` by default) over plain HTTP. No special proxy
+integration is required — no forward-auth outpost, no header passing.
+
+Authentik side (any compliant OIDC provider works):
+
+1. Create an application with an **OAuth2/OpenID Connect** provider of
+   type *Web*.
+2. Redirect URI: `https://yukariko.example.com/auth/callback` (exactly
+   `auth.oidc.redirect_base` + `/auth/callback`).
+3. Note the client ID and client secret; put the secret in an env var or
+   a root-readable file and reference it from
+   `auth.oidc.client_secret_ref`.
+4. The issuer is the provider's issuer URL Authentik shows (for example
+   `https://auth.example.com/application/o/yukariko/`) — use it exactly,
+   trailing slash included.
+5. Optional: add a scope mapping that includes the `groups` claim in the
+   ID token if you want `allowed_groups` enforcement in Yukariko.
+6. Optional: add `https://yukariko.example.com/ui` to the provider's
+   redirect URIs so signing out lands back on the dashboard.
+
+Yukariko side:
+
+```yaml
+server: {enabled: true, bind: 127.0.0.1:8484}
+auth:
+  oidc:
+    enabled: true
+    issuer: https://auth.example.com/application/o/yukariko/
+    client_id: yukariko
+    client_secret_ref: {file: /etc/yukariko/secrets/oidc-client}
+    redirect_base: https://yukariko.example.com
+    allowed_groups: [yukariko-admins]   # optional; empty = provider policy decides
+    session_ttl: 12h
+```
+
+Behavior: unauthenticated dashboard visits redirect to the provider
+(authorization code + PKCE); `/api/v1/*` answers JSON 401s for scripts.
+Verified logins open a server-side session — cookie flags are HttpOnly,
+SameSite=Lax, and `Secure` with a `__Host-` prefix because the external
+origin is https. Sessions expire absolutely after `session_ttl` and are
+swept at startup; sign out from the dashboard footer. Peer reports
+(`/report/v1/events`) are unaffected: they authenticate with their own
+HMAC channel and are never behind the browser session. Login initiation is
+rate-limited per source address as a backstop. If `allowed_groups` is
+non-empty, membership is enforced in Yukariko even if the Authentik
+application's policy bindings drift open.
+
+Notes: the provider is discovered lazily at the first login, so an
+unreachable Authentik never blocks daemon startup — it surfaces as a clear
+sign-in-unavailable page. Yukariko still serves plain HTTP on its bind;
+the TLS story belongs to your proxy, and the daemon should stay bound to
+loopback or a private interface behind it.
+
 ## Retention
 
 `retention.events_days` (default 30), `health_days` (14),

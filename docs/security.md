@@ -16,7 +16,8 @@ state-only.**
 | Git | History destruction, credential leakage | Fast-forward-only merges; `reset --hard` and lossy commands are forbidden by policy and absent from the code; divergence blocks with reasons; URLs sanitized |
 | Peer reports | Forged, replayed, or oversized reports; report-driven execution | HMAC-SHA256 over the exact body + timestamp + IDs, constant-time compare, per-host allowlisted keys with rotation, durable event-ID dedup, clock window, body-size cap, per-host rate limits, closed set of state-only report types — reports cannot name commands |
 | HTTP API + dashboard | Accidental exposure, mutation via web | GET/HEAD-only routes (matrix-tested), no forms or scripts, security headers, loopback bind by default, exposure documented as an operator decision |
-| Supply chain | Third-party assets/dependencies | Stdlib-first (three direct deps: cobra, yaml.v3, modernc sqlite); original assets only, inventoried in docs/ASSETS.md |
+| Published dashboard/API (optional OIDC, #61) | Session theft, token forgery, login CSRF/replay, open redirect, provider spoofing | Authorization code + PKCE (S256); ID tokens verified in-binary (JWKS signature with kid rotation, issuer, audience, expiry via go-oidc with an RS256/ES256 allowlist; nonce compared by Yukariko against the single-use pending row — go-oidc deliberately does not check nonce) — never a hand-rolled verifier and never reverse-proxy headers; `state`/`nonce`/verifier are single-use server-side rows with a 10-minute TTL, and sessions are server-side rows keyed by a SHA-256-hashed 256-bit cookie token (HttpOnly, SameSite=Lax, Secure + `__Host-` prefix on https origins) — a database copy resurrects nothing; the post-login redirect is local-only (absolute, protocol-relative, `/auth`-prefixed, and backslash-carrying targets are all refused); optional `allowed_groups` enforces a default-deny membership check in Yukariko itself; issuer and external origin must be https (loopback http for tests); the client secret resolves only at token exchange |
+| Supply chain | Third-party assets/dependencies | Stdlib-first (five direct deps: cobra, yaml.v3, modernc sqlite, go-oidc, x/oauth2 — the last two are the vetted OIDC relying-party pair, chosen deliberately over hand-rolling auth verification); original assets only, inventoried in docs/ASSETS.md |
 
 ## Security checklist (release review)
 
@@ -31,6 +32,12 @@ state-only.**
 - [x] HTTP API is GET/HEAD-only with security headers and bounded reads;
       the only write endpoint is the signed, rate-limited, replay-protected
       reporting receiver on a separate path.
+- [x] The optional OIDC gate fails closed (enabled requires `server.enabled`
+      and complete identity/origin/secret configuration), never gates the
+      HMAC report channel, and stores only hashed session tokens with a
+      safe claims subset — verified by table tests against a fake provider
+      covering replay, nonce/audience/issuer/expiry violations, unknown
+      signing keys, PKCE, group policy, cookie flags, and rate limits.
 - [x] Deploy checkpoints advance only inside a store transaction after
       required health checks; cancellation cannot record success.
 - [x] Docker daemon access is documented as root-equivalent
@@ -44,3 +51,17 @@ state-only.**
   asymmetric signatures are out of scope for the MVP.
 - Insecure (plain-http) non-loopback registries are unsupported rather
   than half-supported.
+- Sign-out is a GET link (the dashboard stays form-free): a cross-site
+  forced logout is an annoyance, not exposure, and RP-initiated logout
+  depends on the provider honoring `post_logout_redirect_uri`.
+- Yukariko's login rate limit keys on the transport peer, not a forwarded
+  header: behind a reverse proxy all browsers share one bucket, which
+  still bounds total volume; trusting `X-Forwarded-For` was deliberately
+  rejected.
+- The OIDC gate authenticates reads only. Even a verified session can
+  observe, never mutate — there is no mutation route anywhere.
+- The authorization request is not browser-bound (no transient pre-auth
+  cookie): an attacker who initiates a login and hands the victim the
+  callback URL can log the victim in as the attacker. On a read-only
+  surface whose footer always shows the true signed-in subject, the impact
+  is low; the standard cookie mitigation remains a documented follow-up.

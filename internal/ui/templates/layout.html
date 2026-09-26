@@ -29,6 +29,7 @@
 {{template "content" .}}
 </main>
 <footer>
+  {{if .AuthUser}}<p class="session">signed in as {{.AuthUser}} · <a href="/auth/logout">sign out</a></p>{{end}}
   <p class="tagline">Observe · Divine · Bless</p>
   <p>Yukariko observes and records; Docker, Compose, and Git stay the source of truth.
      No control exists on these pages.</p>

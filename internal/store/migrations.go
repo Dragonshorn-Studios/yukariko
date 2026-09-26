@@ -154,4 +154,32 @@ CREATE UNIQUE INDEX idx_deployments_open_per_app
     ON deployments(app_id) WHERE status = 'running';
 `,
 	},
+	{
+		version: 3,
+		ddl: `
+-- Web sessions and in-flight logins for the optional OIDC gate (#61).
+-- The cookie carries a random 256-bit token; only its SHA-256 is stored,
+-- so a database copy cannot resurrect valid cookies. claims is a safe
+-- display subset (subject/groups/email/name) — raw tokens are never
+-- persisted. auth_pending rows are single-use: the atomic
+-- DELETE ... RETURNING in Store.ConsumePendingAuth is the replay guard
+-- for state/nonce/PKCE.
+CREATE TABLE web_sessions (
+	token_hash TEXT PRIMARY KEY,
+	subject TEXT NOT NULL,
+	claims TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	expires_at TEXT NOT NULL,
+	last_seen_at TEXT NOT NULL
+);
+CREATE TABLE auth_pending (
+	state TEXT PRIMARY KEY,
+	nonce TEXT NOT NULL,
+	code_verifier TEXT NOT NULL,
+	redirect_to TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	expires_at TEXT NOT NULL
+);
+`,
+	},
 }

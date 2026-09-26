@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Dragonshorn-Studios/yukariko/internal/auth"
 	"github.com/Dragonshorn-Studios/yukariko/internal/config"
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 )
@@ -349,6 +350,11 @@ func TestLiveJSProgressiveEnhancement(t *testing.T) {
 		`"#main"`,
 		`meta[http-equiv="refresh"]`,
 		"credentials: \"same-origin\"",
+		// Expired sessions fall back to a full navigation (#61), but only
+		// on the gate's designed 401 signal — transient failures keep the
+		// quiet in-place retry so a network blip cannot destroy the page.
+		"res.status === 401",
+		"window.location.assign(",
 	} {
 		if !strings.Contains(js, want) {
 			t.Errorf("live.js missing %q", want)
@@ -370,5 +376,53 @@ func TestLiveJSProgressiveEnhancement(t *testing.T) {
 	}
 	if !strings.Contains(page.Header.Get("Content-Security-Policy"), "script-src 'self'") {
 		t.Error("HTML should lock scripts to same-origin")
+	}
+}
+
+func TestFooterSessionLine(t *testing.T) {
+	t.Parallel()
+	s, srv := uiServer(t, time.Now())
+
+	// Without the OIDC gate the footer shows no session line at all.
+	resp, err := http.Get(srv.URL + "/ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	anon := readAll(resp)
+	resp.Body.Close()
+	if strings.Contains(anon, "signed in as") {
+		t.Error("footer shows a session line without an authenticated request")
+	}
+
+	// With a verified identity in the context (what the gate's Protect
+	// injects), the footer names the subject and links the way out.
+	gated := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := auth.WithIdentity(req.Context(), auth.Identity{Subject: "ada"})
+		s.Handler().ServeHTTP(w, req.WithContext(ctx))
+	}))
+	defer gated.Close()
+	resp, err = http.Get(gated.URL + "/ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := readAll(resp)
+	resp.Body.Close()
+	if !strings.Contains(body, "signed in as ada") {
+		t.Error("footer missing the signed-in subject under the gate")
+	}
+	if !strings.Contains(body, `href="/auth/logout"`) {
+		t.Error("footer missing the sign-out link under the gate")
+	}
+	// Static assets are files, not templates — the session line can never
+	// render into them (and under the gate they are protected like every
+	// other /ui path).
+	resp, err = http.Get(gated.URL + "/ui/static/live.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	static := readAll(resp)
+	resp.Body.Close()
+	if strings.Contains(static, "signed in as") {
+		t.Error("static asset leaked a session line")
 	}
 }
