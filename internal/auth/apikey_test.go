@@ -2,11 +2,13 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,15 +20,17 @@ import (
 // keys-only tests never need the OIDC flow, and sessions — when a case
 // needs one — are seeded directly into the store.
 type keyHarness struct {
-	srv   *Server
-	ts    *httptest.Server
-	store *store.Store
-	clock *fakeClock
+	srv     *Server
+	ts      *httptest.Server
+	store   *store.Store
+	dataDir string
+	clock   *fakeClock
 }
 
 func newKeyHarness(t *testing.T, oidcEnabled bool) *keyHarness {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	dataDir := t.TempDir()
+	st, err := store.Open(dataDir)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
@@ -59,7 +63,7 @@ func newKeyHarness(t *testing.T, oidcEnabled bool) *keyHarness {
 	})
 	ts := httptest.NewServer(srv.Protect(mux))
 	t.Cleanup(ts.Close)
-	return &keyHarness{srv: srv, ts: ts, store: st, clock: clock}
+	return &keyHarness{srv: srv, ts: ts, store: st, dataDir: dataDir, clock: clock}
 }
 
 // oidcConfigFor keeps the two harness modes straight: enabled means "OIDC
@@ -298,6 +302,31 @@ func TestAPIKeyStoreFailureAnswers503(t *testing.T) {
 	}
 	if retry := res.Header.Get("Retry-After"); retry == "" {
 		t.Error("503 should carry Retry-After")
+	}
+}
+
+// A row corrupted outside Yukariko fails closed as unauthenticated (401,
+// the claims-unreadable precedent) — not 503, which would send compliant
+// clients retrying forever against a permanent per-row condition.
+func TestAPIKeyCorruptRowFailsClosedAs401(t *testing.T) {
+	t.Parallel()
+	h := newKeyHarness(t, false)
+	token := h.seedKey(t, "amadeus", nil)
+
+	// Corrupt the row through a second handle on the same database file,
+	// simulating a foreign tool write.
+	db, err := sql.Open("sqlite", filepath.Join(h.dataDir, "yukariko.db"))
+	if err != nil {
+		t.Fatalf("open second handle: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE api_keys SET expires_at = 'not-a-timestamp'`); err != nil {
+		t.Fatalf("corrupt row: %v", err)
+	}
+
+	res, _ := h.get(t, "/api/v1/apps", token)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("GET /api with corrupt key row = %d, want 401", res.StatusCode)
 	}
 }
 

@@ -47,10 +47,17 @@ func (s *Store) CreateAPIKey(ctx context.Context, k APIKey) error {
 	return nil
 }
 
+// ErrCorruptAPIKey marks an api_keys row whose stored timestamps fail to
+// parse (external tampering, foreign tool write). It lets auth callers
+// distinguish one unreadable row — fail closed as unauthenticated — from
+// genuine store unavailability, which answers 503.
+var ErrCorruptAPIKey = errors.New("api key row is unreadable")
+
 // APIKeyByHash returns the row for a token hash regardless of validity;
 // callers decide with Active. ok=false covers unknown hashes only — an
 // invalid (revoked/expired) key and an unknown one are deliberately
-// indistinguishable to the requester.
+// indistinguishable to the requester. A corrupt row is an error wrapping
+// ErrCorruptAPIKey.
 func (s *Store) APIKeyByHash(ctx context.Context, tokenHash string) (APIKey, bool, error) {
 	return s.scanAPIKey(s.db.QueryRowContext(ctx,
 		`SELECT id, name, token_hash, created_at, expires_at, last_used_at, revoked_at
@@ -156,7 +163,7 @@ func scanAPIKeyRows(rows *sql.Rows) (APIKey, error) {
 func parseAPIKeyTimes(k *APIKey, created, expires, lastUsed, revoked sql.NullString) error {
 	createdAt, err := time.Parse(time.RFC3339Nano, created.String)
 	if err != nil {
-		return fmt.Errorf("read api key: parse created_at: %w", err)
+		return fmt.Errorf("%w: parse created_at: %v", ErrCorruptAPIKey, err)
 	}
 	k.CreatedAt = createdAt
 	if k.ExpiresAt, err = nullableTimeFrom(expires, "expires_at"); err != nil {
@@ -180,7 +187,7 @@ func nullableTimeFrom(n sql.NullString, column string) (*time.Time, error) {
 	}
 	t, err := time.Parse(time.RFC3339Nano, n.String)
 	if err != nil {
-		return nil, fmt.Errorf("read api key: parse %s: %w", column, err)
+		return nil, fmt.Errorf("%w: parse %s: %v", ErrCorruptAPIKey, column, err)
 	}
 	return &t, nil
 }

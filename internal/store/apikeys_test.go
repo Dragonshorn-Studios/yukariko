@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -173,6 +174,27 @@ func TestAPIKeyRevokeDoesNotTouchNameCollidingKey(t *testing.T) {
 	}
 	if collide.RevokedAt != nil {
 		t.Error("revoking a key by id must not touch another key named after that id")
+	}
+}
+
+// A row corrupted outside Yukariko (foreign write, tampering) must error
+// with the typed sentinel — never read as "never expires" or folded into a
+// generic store outage.
+func TestAPIKeyCorruptRowIsTyped(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := s.CreateAPIKey(ctx, APIKey{Name: "amadeus", TokenHash: "hash-x", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateAPIKey: %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE api_keys SET expires_at = 'not-a-timestamp'`); err != nil {
+		t.Fatalf("corrupt row: %v", err)
+	}
+	_, _, err := s.APIKeyByHash(ctx, "hash-x")
+	if !errors.Is(err, ErrCorruptAPIKey) {
+		t.Fatalf("APIKeyByHash(corrupt) err = %v; want ErrCorruptAPIKey", err)
 	}
 }
 

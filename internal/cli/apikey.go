@@ -235,8 +235,15 @@ func (a *App) newAPIKeyRevokeCommand() *cobra.Command {
 			// Revoke by the resolved row's id: a single namespace, so a key
 			// whose name happens to equal another key's id can never be
 			// swept up (or stand in) for the target.
-			if _, err := asm.Store.RevokeAPIKey(ctx, k.ID, now); err != nil {
+			ok, err = asm.Store.RevokeAPIKey(ctx, k.ID, now)
+			if err != nil {
 				return err
+			}
+			if !ok {
+				// Another process revoked it between the lookup and the
+				// update; the end state is what the operator asked for.
+				fmt.Fprintf(cmd.OutOrStdout(), "api key %q was already revoked (by another process).\n", k.Name)
+				return nil
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "api key %q revoked; it stops working immediately.\n", k.Name)
 			return nil

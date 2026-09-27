@@ -1,8 +1,11 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 )
 
 // APIKeyPrefix marks Yukariko-generated bearer tokens. The prefix is an
@@ -34,13 +37,20 @@ func (s *Server) apiKeyIdentity(req *http.Request) (id Identity, valid, presente
 	}
 	key, found, err := s.Store.APIKeyByHash(req.Context(), tokenHash(cred))
 	if err != nil {
+		// One unreadable row is a permanent, per-key condition: fail closed
+		// as unauthenticated (the claims-unreadable precedent), not with a
+		// 503 that would send compliant clients retrying forever.
+		if errors.Is(err, store.ErrCorruptAPIKey) {
+			s.log().Warn("api key row unreadable; failing closed", "error", err)
+			return Identity{}, false, true, nil
+		}
 		return Identity{}, false, true, err
 	}
 	if !found || !key.Active(s.now()) {
 		return Identity{}, false, true, nil
 	}
 	if tErr := s.Store.TouchAPIKey(req.Context(), key.ID, s.now()); tErr != nil {
-		s.log().Warn("touch api key", "error", tErr)
+		s.log().Warn("touch api key", "key", key.Name, "error", tErr)
 	}
 	return Identity{Subject: "apikey:" + key.Name}, true, true, nil
 }
