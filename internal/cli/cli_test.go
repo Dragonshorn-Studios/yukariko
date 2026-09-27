@@ -36,7 +36,7 @@ func TestHelpListsCommands(t *testing.T) {
 	}
 	out := stdout.String()
 	commands := commandSection(out)
-	for _, name := range []string{"run", "check", "update", "restart", "status", "logs", "learn"} {
+	for _, name := range []string{"run", "check", "update", "restart", "status", "logs", "learn", "apikey"} {
 		if !strings.Contains(commands, name) {
 			t.Errorf("help missing command %q\n%s", name, out)
 		}

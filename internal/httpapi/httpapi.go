@@ -8,7 +8,8 @@
 //
 // The default bind is loopback (127.0.0.1:8484). Exposing the API beyond
 // localhost is an operator decision: put it behind existing access controls
-// or an authenticating tunnel; this service implements no authentication.
+// or enable authentication — the optional gate in internal/auth wraps this
+// package with OIDC sessions and/or API keys (issues #61 and #64).
 package httpapi
 
 import (

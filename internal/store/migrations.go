@@ -182,4 +182,23 @@ CREATE TABLE auth_pending (
 );
 `,
 	},
+	{
+		version: 4,
+		ddl: `
+-- API keys for machine access to the read-only HTTP API (#64). The client
+-- carries a random 256-bit token with the ykr_ prefix; only its SHA-256 is
+-- stored, so a database copy cannot resurrect a key. Revoke is soft
+-- (revoked_at) for audit; revoked and expired keys fail Store.APIKeyByHash
+-- validation at lookup time, never at some cached layer.
+CREATE TABLE api_keys (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL UNIQUE,
+	token_hash TEXT NOT NULL UNIQUE,
+	created_at TEXT NOT NULL,
+	expires_at TEXT,
+	last_used_at TEXT,
+	revoked_at TEXT
+);
+`,
+	},
 }

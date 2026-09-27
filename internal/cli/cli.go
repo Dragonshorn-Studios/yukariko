@@ -85,6 +85,7 @@ and runs controlled local commands; it does not replace Compose, Coolify, or Por
 	root.AddCommand(a.newLogsCommand())
 	root.AddCommand(a.newLearnCommand())
 	root.AddCommand(a.newExposeCommand())
+	root.AddCommand(a.newAPIKeyCommand())
 
 	return root
 }

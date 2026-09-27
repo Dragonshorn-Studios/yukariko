@@ -59,6 +59,10 @@ type Server struct {
 	// time; do not mutate it after the first use — the cached verifier
 	// snapshots ClientID at discovery.
 	OIDC config.OIDCAuth
+	// APIKeys enables bearer-key authentication on /api paths (issue #64).
+	// Keys live in the store; when OIDC is disabled the gate runs in a
+	// keys-only mode that leaves /ui open and requires a key for /api.
+	APIKeys bool
 	// Store persists sessions and single-use login state.
 	Store *store.Store
 	// HTTPClient is used for discovery, token exchange, and JWKS key
@@ -146,31 +150,69 @@ func noStore(next http.Handler) http.Handler {
 	})
 }
 
-// Protect gates the dashboard and API behind the session. Only /ui and /api
-// are protected: /auth carries its own handlers and /report keeps its
-// independent HMAC authentication (machine peers, not browsers). A failing
-// session store answers 503 instead of a login redirect — the login cannot
-// succeed against the same broken store, so the redirect would be a lie.
+// Protect gates the dashboard and API behind the session and, when API
+// keys are enabled, bearer keys. Only /ui and /api are protected: /auth
+// carries its own handlers and /report keeps its independent HMAC
+// authentication (machine peers, not browsers). A failing session or key
+// store answers 503 instead of a login redirect — the login cannot succeed
+// against the same broken store, so the redirect would be a lie.
 func (s *Server) Protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if isProtected(req.URL.Path) {
-			id, ok, err := s.identity(req)
-			if err != nil {
-				s.log().Error("web session store unavailable", "error", err)
-				w.Header().Set("Cache-Control", "no-store")
-				w.Header().Set("Retry-After", "30")
-				http.Error(w, "authentication backend unavailable", http.StatusServiceUnavailable)
+			if s.APIKeys && isAPIPath(req.URL.Path) {
+				id, ok, presented, err := s.apiKeyIdentity(req)
+				if err != nil {
+					s.log().Error("api key store unavailable", "error", err)
+					s.backendUnavailable(w)
+					return
+				}
+				if presented {
+					// A presented key is the request's credential claim: it
+					// must validate, or the request is rejected — no silent
+					// fallback to a session cookie.
+					if ok {
+						next.ServeHTTP(w, req.WithContext(WithIdentity(req.Context(), id)))
+						return
+					}
+					s.reject(w, req)
+					return
+				}
+				if !s.OIDC.Enabled {
+					// Keys-only mode: no sessions exist, so an unkeyed API
+					// request cannot authenticate.
+					s.reject(w, req)
+					return
+				}
+				// OIDC is on and no key was presented: the session flow below
+				// decides (a browser session still unlocks /api).
+			}
+			if s.OIDC.Enabled {
+				id, ok, err := s.identity(req)
+				if err != nil {
+					s.log().Error("web session store unavailable", "error", err)
+					s.backendUnavailable(w)
+					return
+				}
+				if ok {
+					next.ServeHTTP(w, req.WithContext(WithIdentity(req.Context(), id)))
+					return
+				}
+				s.reject(w, req)
 				return
 			}
-			if ok {
-				next.ServeHTTP(w, req.WithContext(WithIdentity(req.Context(), id)))
-				return
-			}
-			s.reject(w, req)
-			return
+			// Keys-only mode reaching this point is /ui: it stays open,
+			// exactly as when no authentication is configured.
 		}
 		next.ServeHTTP(w, req)
 	})
+}
+
+// backendUnavailable answers a failing auth store: fail closed with a
+// retryable 503, never a redirect or a pass-through.
+func (s *Server) backendUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Retry-After", "30")
+	http.Error(w, "authentication backend unavailable", http.StatusServiceUnavailable)
 }
 
 func isProtected(path string) bool {

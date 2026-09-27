@@ -91,9 +91,13 @@ func (a *App) newRunCommand() *cobra.Command {
 				}
 				var root http.Handler = mux
 				if asm.Authenticator != nil {
-					mux.Handle("/auth/", asm.Authenticator.Handler())
-					// Protect gates /ui and /api; /auth serves the login
-					// flow and /report keeps its own HMAC channel.
+					if asm.Authenticator.OIDC.Enabled {
+						mux.Handle("/auth/", asm.Authenticator.Handler())
+					}
+					// Protect gates /ui and /api (sessions, plus API keys
+					// when configured); /auth serves the login flow and
+					// /report keeps its own HMAC channel. In keys-only mode
+					// no /auth routes exist and /ui stays open.
 					root = asm.Authenticator.Protect(mux)
 				}
 				ln, err := net.Listen("tcp", asm.APIBind)
@@ -104,8 +108,11 @@ func (a *App) newRunCommand() *cobra.Command {
 				go func() { _ = srv.Serve(ln) }()
 				defer srv.Close()
 				fmt.Fprintf(out, "listening on %s (dashboard /ui/, API /api/, reports /report/v1/events).\n", asm.APIBind)
-				if asm.Authenticator != nil {
+				if asm.Authenticator != nil && asm.Authenticator.OIDC.Enabled {
 					fmt.Fprintf(out, "auth: oidc enabled (issuer %s, sessions expire after %s).\n", asm.Authenticator.OIDC.Issuer, asm.Authenticator.OIDC.SessionTTL.D())
+				}
+				if asm.Authenticator != nil && asm.Authenticator.APIKeys {
+					fmt.Fprintf(out, "auth: api keys enabled (/api requires a bearer key; manage with `yukariko apikey`).\n")
 				}
 			}
 			var wg sync.WaitGroup

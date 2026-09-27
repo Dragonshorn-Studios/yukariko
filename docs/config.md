@@ -290,6 +290,26 @@ logged or stored). Enabling the gate requires `server.enabled: true` —
 (`/report/v1/events`) is never session-gated; it keeps its own HMAC
 authentication.
 
+```yaml
+auth:
+  api_keys:
+    enabled: false
+```
+
+API keys (issue #64) are machine credentials for the read-only API,
+managed entirely through the CLI — `yukariko apikey create`, `apikey list`,
+`apikey revoke` — and stored by SHA-256 hash only; the bearer token is
+printed exactly once at creation and never persisted, logged, or written to
+YAML. Enabling the feature is fail-closed in the same way the OIDC gate is:
+`auth.api_keys.enabled` requires `server.enabled`, and every `/api/v1`
+request must then carry a valid key (or, when OIDC is also configured, a
+session cookie). A presented-but-invalid key is rejected even when a valid
+session exists — credentials that fail never fall through. Revocation is a
+CLI command away and takes effect immediately (validation hits the store;
+nothing is cached). The dashboard (`/ui`) is never unlocked by API keys, and
+`/report/v1/events` keeps its HMAC channel regardless. With the feature off
+the HTTP surface behaves exactly as before.
+
 ## Validation summary
 
 Rejected with path-aware errors: unknown/duplicate fields, unsupported or
@@ -302,6 +322,7 @@ and key references, an `auth.oidc` section that enables itself without
 `server.enabled`, an issuer, a client id, a secret reference, or an external
 `redirect_base` (or that carries non-https origins off loopback, origins
 with a path, scopes without `openid`, a `session_ttl` outside 1m–720h, or
-empty group names), and Docker endpoints setting both `context` and `host`
+empty group names), `auth.api_keys` enabled without `server.enabled`, and
+Docker endpoints setting both `context` and `host`
 or carrying a host without a `unix://`, `tcp://`, `ssh://`, or `npipe://`
 scheme.

@@ -271,4 +271,19 @@ func TestAssembleBuildsAuthenticatorWhenEnabled(t *testing.T) {
 	if asm.Authenticator != nil {
 		t.Error("Authenticator != nil, want nil when auth is disabled")
 	}
+
+	// API keys alone wire the gate in keys-only mode: no OIDC config, no
+	// /auth routes, but /api requires a bearer key.
+	keysOnly := config.Auth{APIKeys: config.APIKeysAuth{Enabled: true}}
+	asm, err = Assemble(context.Background(), Options{Config: newCfg(keysOnly), DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Assemble with api keys: %v", err)
+	}
+	defer asm.Store.Close()
+	if asm.Authenticator == nil {
+		t.Fatal("Authenticator = nil, want the keys-only gate wired when api_keys is enabled")
+	}
+	if !asm.Authenticator.APIKeys || asm.Authenticator.OIDC.Enabled {
+		t.Errorf("keys-only gate misconfigured: api_keys=%v oidc=%v", asm.Authenticator.APIKeys, asm.Authenticator.OIDC.Enabled)
+	}
 }

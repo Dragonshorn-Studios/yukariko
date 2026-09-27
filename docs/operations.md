@@ -230,6 +230,42 @@ sign-in-unavailable page. Yukariko still serves plain HTTP on its bind;
 the TLS story belongs to your proxy, and the daemon should stay bound to
 loopback or a private interface behind it.
 
+## API keys for machine access
+
+When a service (rather than a browser) needs to read state — a dashboard
+aggregator, a chat bot, another Yukariko peer tool — issue it an API key
+(issue #64) instead of an OIDC login:
+
+```console
+$ yukariko apikey create --name amadeus
+API key "amadeus" created. The bearer token is:
+
+  ykr_9xKm2Lq-...
+
+Store it now: this token is shown exactly once and cannot be recovered.
+```
+
+Store the token in the consuming service's own secret store; it is
+verifiable by any HTTP client:
+
+```console
+$ curl -sS -H "Authorization: Bearer ykr_9xKm2Lq-..." https://yukariko.example.com/api/v1/apps
+```
+
+Keys unlock `GET /api/v1/*` only — never the dashboard, never the report
+channel — and they grant full read: the API has no write routes, so there
+is nothing narrower to grant. Rotation is revoke-then-recreate:
+
+```console
+$ yukariko apikey list
+$ yukariko apikey revoke amadeus
+```
+
+Revocation takes effect immediately; keys may carry an expiry
+(`--expires 720h`). Keys work with or without OIDC: with both enabled, `/api`
+accepts either a session (browsers) or a key (machines). Enabling
+`auth.api_keys` requires `server.enabled`.
+
 ## Retention
 
 `retention.events_days` (default 30), `health_days` (14),
