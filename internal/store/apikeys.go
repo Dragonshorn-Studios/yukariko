@@ -95,12 +95,15 @@ func (s *Store) ListAPIKeys(ctx context.Context) ([]APIKey, error) {
 	return out, nil
 }
 
-// RevokeAPIKey soft-revokes by id or name. ok=false means the key does not
-// exist or was already revoked — callers distinguish via the lookups above.
-func (s *Store) RevokeAPIKey(ctx context.Context, ref string, now time.Time) (bool, error) {
+// RevokeAPIKey soft-revokes by id. The CLI resolves names to ids before
+// calling this: a single namespace keeps a name that happens to collide
+// with another key's id from revoking two rows (or masking the targeted
+// one). ok=false means the key does not exist or was already revoked —
+// callers distinguish via the lookups above.
+func (s *Store) RevokeAPIKey(ctx context.Context, id string, now time.Time) (bool, error) {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE api_keys SET revoked_at = ? WHERE (id = ? OR name = ?) AND revoked_at IS NULL`,
-		rfc3339(now), ref, ref)
+		`UPDATE api_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+		rfc3339(now), id)
 	if err != nil {
 		return false, fmt.Errorf("revoke api key: %w", err)
 	}

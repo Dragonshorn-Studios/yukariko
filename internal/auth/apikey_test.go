@@ -133,7 +133,11 @@ func TestAPIKeyRejectionMatrix(t *testing.T) {
 		k.ExpiresAt = &past
 	})
 	revoked := h.seedKey(t, "revoked", nil)
-	if ok, err := h.store.RevokeAPIKey(context.Background(), "revoked", h.clock.now); err != nil || !ok {
+	revokedKey, ok, err := h.store.APIKeyByName(context.Background(), "revoked")
+	if err != nil || !ok {
+		t.Fatalf("revoke setup lookup: ok=%v err=%v", ok, err)
+	}
+	if ok, err := h.store.RevokeAPIKey(context.Background(), revokedKey.ID, h.clock.now); err != nil || !ok {
 		t.Fatalf("revoke setup: %v, %v", ok, err)
 	}
 
@@ -243,6 +247,38 @@ func TestAPIKeyCoexistsWithSessions(t *testing.T) {
 	res3.Body.Close()
 	if res3.StatusCode != http.StatusUnauthorized {
 		t.Errorf("GET /api with bad key and good cookie = %d, want 401", res3.StatusCode)
+	}
+}
+
+// A session cookie that outlives an oidc→keys-only config flip must not
+// authenticate /api: in keys-only mode the session flow never runs.
+func TestAPIKeyKeysOnlyRejectsStaleSessions(t *testing.T) {
+	t.Parallel()
+	h := newKeyHarness(t, false)
+	now := h.clock.now
+	if err := h.store.CreateWebSession(context.Background(), store.WebSession{
+		TokenHash:  tokenHash("stale-token"),
+		Subject:    "ada",
+		Claims:     "{}",
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(time.Hour),
+		LastSeenAt: now,
+	}); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, h.ts.URL+"/api/v1/apps", nil)
+	req.AddCookie(&http.Cookie{Name: insecureCookieName, Value: "stale-token"})
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api with stale cookie: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("GET /api with cookie in keys-only mode = %d, want 401", res.StatusCode)
+	}
+	if got := res.Header.Get("Content-Type"); got != "application/json" {
+		t.Errorf("content type = %q, want application/json", got)
 	}
 }
 

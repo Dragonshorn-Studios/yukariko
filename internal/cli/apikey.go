@@ -232,7 +232,10 @@ func (a *App) newAPIKeyRevokeCommand() *cobra.Command {
 				return nil
 			}
 			now := time.Now().UTC()
-			if _, err := asm.Store.RevokeAPIKey(ctx, ref, now); err != nil {
+			// Revoke by the resolved row's id: a single namespace, so a key
+			// whose name happens to equal another key's id can never be
+			// swept up (or stand in) for the target.
+			if _, err := asm.Store.RevokeAPIKey(ctx, k.ID, now); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "api key %q revoked; it stops working immediately.\n", k.Name)

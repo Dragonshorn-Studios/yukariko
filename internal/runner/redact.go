@@ -24,11 +24,14 @@ type Redactor struct {
 // credentialPatterns covers the common ways commands echo credentials:
 // URLs with userinfo, authorization headers, token-style query or body
 // parameters, and bare Yukariko API-key tokens (#64) wherever they appear.
+// The api-token pattern has no trailing \b on purpose: base64url tokens
+// can end in '-', which is not a word character, and a backtracking match
+// would leave the last few characters visible.
 var (
-	urlCredPattern = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*)://([^:/@\s]+):([^@\s/]+)@`)
-	headerPattern  = regexp.MustCompile(`(?i)((?:proxy-)?authorization|x-api-key|x-auth-token)\s*:[^\r\n]*`)
-	queryPattern   = regexp.MustCompile(`(?i)((?:api_?key|access_?token|auth_?token|token|secret|password|passwd|pwd)[_=])([^&\s"']+)`)
-	apiTokenPattern = regexp.MustCompile(`\bykr_[a-zA-Z0-9_-]{20,}\b`)
+	urlCredPattern  = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*)://([^:/@\s]+):([^@\s/]+)@`)
+	headerPattern   = regexp.MustCompile(`(?i)((?:proxy-)?authorization|x-api-key|x-auth-token)\s*:[^\r\n]*`)
+	queryPattern    = regexp.MustCompile(`(?i)((?:api_?key|access_?token|auth_?token|token|secret|password|passwd|pwd)[_=])([^&\s"']+)`)
+	apiTokenPattern = regexp.MustCompile(`\bykr_[a-zA-Z0-9_-]{20,}`)
 )
 
 // NewRedactor builds a redactor for the given literal secret values. Values

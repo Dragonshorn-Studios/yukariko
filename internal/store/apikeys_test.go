@@ -110,37 +110,69 @@ func TestAPIKeyRevoke(t *testing.T) {
 	if err := s.CreateAPIKey(ctx, APIKey{Name: "amadeus", TokenHash: "aaaa1111", CreatedAt: now}); err != nil {
 		t.Fatalf("CreateAPIKey: %v", err)
 	}
-
-	// Revoke by name.
-	ok, err := s.RevokeAPIKey(ctx, "amadeus", now)
-	if err != nil || !ok {
-		t.Fatalf("RevokeAPIKey(name) = %v, %v; want true", ok, err)
-	}
 	got, ok, err := s.APIKeyByName(ctx, "amadeus")
+	if err != nil || !ok {
+		t.Fatalf("APIKeyByName: ok=%v err=%v", ok, err)
+	}
+
+	// Revoke by the resolved id.
+	ok, err = s.RevokeAPIKey(ctx, got.ID, now)
+	if err != nil || !ok {
+		t.Fatalf("RevokeAPIKey(id) = %v, %v; want true", ok, err)
+	}
+	after, ok, err := s.APIKeyByName(ctx, "amadeus")
 	if err != nil || !ok {
 		t.Fatalf("APIKeyByName after revoke: ok=%v err=%v", ok, err)
 	}
-	if got.Active(now) {
+	if after.Active(now) {
 		t.Error("revoked key must not be active")
 	}
-	if got.RevokedAt == nil {
+	if after.RevokedAt == nil {
 		t.Error("revoked_at should be recorded")
 	}
 
-	// Revoke again is a no-op (already revoked), by name or id.
-	ok, err = s.RevokeAPIKey(ctx, "amadeus", now)
+	// Revoke again is a no-op (already revoked).
+	ok, err = s.RevokeAPIKey(ctx, got.ID, now)
 	if err != nil || ok {
 		t.Errorf("RevokeAPIKey(already revoked) = %v, %v; want false, nil", ok, err)
 	}
-	ok, err = s.RevokeAPIKey(ctx, got.ID, now)
-	if err != nil || ok {
-		t.Errorf("RevokeAPIKey(id, already revoked) = %v, %v; want false, nil", ok, err)
-	}
 
-	// Unknown reference: false, nil.
+	// Unknown id: false, nil.
 	ok, err = s.RevokeAPIKey(ctx, "ghost", now)
 	if err != nil || ok {
 		t.Errorf("RevokeAPIKey(unknown) = %v, %v; want false, nil", ok, err)
+	}
+}
+
+// Revocation is keyed on the id alone: a second key whose NAME equals the
+// first key's id must never be swept up by the same revoke.
+func TestAPIKeyRevokeDoesNotTouchNameCollidingKey(t *testing.T) {
+	t.Parallel()
+	s := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	if err := s.CreateAPIKey(ctx, APIKey{Name: "target", TokenHash: "hash-target", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateAPIKey(target): %v", err)
+	}
+	target, ok, err := s.APIKeyByName(ctx, "target")
+	if err != nil || !ok {
+		t.Fatalf("APIKeyByName(target): ok=%v err=%v", ok, err)
+	}
+	if err := s.CreateAPIKey(ctx, APIKey{Name: target.ID, TokenHash: "hash-collide", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateAPIKey(name=target.id): %v", err)
+	}
+
+	if ok, err := s.RevokeAPIKey(ctx, target.ID, now); err != nil || !ok {
+		t.Fatalf("RevokeAPIKey(target.id) = %v, %v; want true", ok, err)
+	}
+
+	collide, ok, err := s.APIKeyByName(ctx, target.ID)
+	if err != nil || !ok {
+		t.Fatalf("APIKeyByName(collision): ok=%v err=%v", ok, err)
+	}
+	if collide.RevokedAt != nil {
+		t.Error("revoking a key by id must not touch another key named after that id")
 	}
 }
 
