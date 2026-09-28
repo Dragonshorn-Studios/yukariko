@@ -103,22 +103,20 @@ func (d *Dispatcher) EnqueueDeployment(ctx context.Context, appID, detail, statu
 		depStatus = "failed"
 	}
 
-	// The deployment row carries the full from/to versions; the schedule
-	// event's detail is a stage summary, not a version.
-	rows, err := d.Store.RecentDeployments(ctx, appID, 5)
+	// The payload must name the pass's own deployment row. Match only the
+	// newest row overall and require it to be the terminal outcome: a
+	// running row (unchanged-digest no-op, a cross-process lock bail whose
+	// pass still transitioned, a reap race) means this outcome has no
+	// deployment of its own, and attributing it to an older row would
+	// misreport history to receivers.
+	rows, err := d.Store.RecentDeployments(ctx, appID, 1)
 	if err != nil {
 		return fmt.Errorf("find deployment for webhook: %w", err)
 	}
-	var dep *store.Deployment
-	for i := range rows {
-		if rows[i].Status == depStatus {
-			dep = &rows[i]
-			break
-		}
+	if len(rows) == 0 || rows[0].Status != depStatus {
+		return fmt.Errorf("no terminal %s deployment row for app %q; skipping webhook (the outcome has no deployment record of its own)", depStatus, appID)
 	}
-	if dep == nil {
-		return fmt.Errorf("no %s deployment row found for app %q", depStatus, appID)
-	}
+	dep := &rows[0]
 
 	payload := Payload{
 		Version: PayloadVersion,

@@ -118,6 +118,9 @@ func (s *Sender) Send(ctx context.Context, hook config.Webhook, event, deliveryI
 		return Attempt{Delivered: true}, nil
 	}
 	att := Attempt{Detail: fmt.Sprintf("receiver answered %d", res.StatusCode)}
+	if res.StatusCode >= 300 && res.StatusCode < 400 {
+		att.Detail = fmt.Sprintf("receiver answered %d (redirect not followed: the signature binds the delivery to its target)", res.StatusCode)
+	}
 	if res.StatusCode == http.StatusGone {
 		att.Abandon = true
 	}

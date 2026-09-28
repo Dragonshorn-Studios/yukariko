@@ -281,6 +281,34 @@ func TestEnqueueFailsWithoutDeploymentRow(t *testing.T) {
 	}
 }
 
+// An outcome whose pass has no terminal deployment row of its own — an
+// unchanged-digest no-op, a cross-process lock bail, a reap race — must not
+// be attributed to an older deployment: skip, and let the sink's warn
+// carry it.
+func TestEnqueueSkipsWhenNewestRowIsNotTheOutcome(t *testing.T) {
+	t.Parallel()
+	st := testStore(t)
+	d := &Dispatcher{Store: st, Hooks: []config.Webhook{{Name: "a"}}, Log: quietLogger(),
+		Now: func() time.Time { return time.Now().UTC().Truncate(time.Second) }}
+
+	// A prior succeeded deployment exists, but the newest row is running
+	// (the pass's own row never reached a terminal state). Stamps are
+	// truncated and spaced so string-ordered started_at is unambiguous.
+	base := time.Now().UTC().Truncate(time.Second)
+	seedDeployment(t, st, "web", "succeeded")
+	if _, err := st.BeginDeployment(context.Background(), store.BeginDeploymentParams{
+		AppID: "web", Cause: "update", At: base.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("BeginDeployment: %v", err)
+	}
+	if err := d.EnqueueDeployment(context.Background(), "web", "digest unchanged; nothing to recreate", "succeeded"); err == nil {
+		t.Fatal("enqueue over a running newest row must refuse")
+	}
+	if n, _ := st.PendingWebhookCount(context.Background()); n != 0 {
+		t.Errorf("pending = %d; want 0 (nothing enqueued for a stale attribution)", n)
+	}
+}
+
 // The drain loop delivers, retries on failure with backoff, and abandons at
 // the attempt cap.
 func TestDispatcherDrainRetryAndAbandon(t *testing.T) {

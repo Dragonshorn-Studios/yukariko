@@ -579,7 +579,9 @@ func (s *eventSink) RecordAppEvent(ctx context.Context, e schedule.Event) error 
 	})
 	// Deployment outcomes are reported outbound (audit events: never
 	// coalesced or dropped) and fanned out to configured webhooks. Check
-	// outcomes are not — heartbeats carry liveness.
+	// outcomes are not — heartbeats carry liveness. Both enqueue paths are
+	// local inserts; a failure is logged (the scheduler discards sink
+	// errors) and never fails the pass.
 	if e.Kind == schedule.EventState &&
 		(e.To == schedule.StateSucceeded || e.To == schedule.StateFailed) && e.From == schedule.StateDeploying {
 		status := "succeeded"
@@ -588,7 +590,7 @@ func (s *eventSink) RecordAppEvent(ctx context.Context, e schedule.Event) error 
 		}
 		if s.reporter != nil {
 			if err := s.reporter.EnqueueDeployment(ctx, e.AppID, e.Detail, status); err != nil {
-				return err
+				slog.Error("enqueue outbound deployment report", "app", e.AppID, "error", err)
 			}
 		}
 		// Webhook enqueue failures are logged and never fatal: delivery
