@@ -104,7 +104,7 @@ func (d *Dispatcher) EnqueueDeployment(ctx context.Context, appID, detail, statu
 	}
 
 	// The payload must name the pass's own deployment row. Match only the
-	// newest row overall and require it to be the terminal outcome: a
+	// newest row for this app and require it to be the terminal outcome: a
 	// running row (unchanged-digest no-op, a cross-process lock bail whose
 	// pass still transitioned, a reap race) means this outcome has no
 	// deployment of its own, and attributing it to an older row would

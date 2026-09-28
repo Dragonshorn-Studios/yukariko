@@ -631,8 +631,6 @@ func validPortNumber(s string) error {
 	return nil
 }
 
-// isLoopbackHost reports whether a URL targets localhost; plain http is
-// allowed there for tests only.
 // reservedWebhookHeader reports whether a static delivery header would
 // collide with one Yukariko computes per delivery (the signature block and
 // content type). Static headers are applied first and must not be able to
@@ -642,6 +640,9 @@ func reservedWebhookHeader(name string) bool {
 	return strings.EqualFold(name, "Content-Type") ||
 		(len(name) >= len(prefix) && strings.EqualFold(name[:len(prefix)], prefix))
 }
+
+// isLoopbackHost reports whether a URL targets localhost; plain http is
+// allowed there for tests only.
 
 func isLoopbackHost(u *url.URL) bool {
 	h := u.Hostname()

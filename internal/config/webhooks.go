@@ -3,7 +3,7 @@ package config
 // Webhook is one operator-configured outbound notification target
 // (issue #65). Targets are trusted endpoints the operator registers in
 // YAML — the HTTP surface stays read-only, so there is no other way in.
-// Delivery is at-least-once from a durable queue; see internal/webhook.
+// Delivery is at-least-once from a durable queue; see internal/webhooks.
 type Webhook struct {
 	// Name is a unique human-readable identifier used in logs, CLI output,
 	// and the X-Yukariko-Delivery header.

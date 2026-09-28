@@ -115,6 +115,16 @@ func (a *App) newWebhookAddCommand() *cobra.Command {
 	return cmd
 }
 
+// webhookView is the display projection of a configured target: tagged
+// fields, human-scale timeout.
+type webhookView struct {
+	Name      string                 `json:"name"`
+	URL       string                 `json:"url"`
+	Timeout   string                 `json:"timeout"`
+	SecretRef *config.SecretRef      `json:"secret_ref,omitempty"`
+	Headers   []config.WebhookHeader `json:"headers,omitempty"`
+}
+
 func (a *App) newWebhookListCommand() *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
@@ -134,9 +144,23 @@ func (a *App) newWebhookListCommand() *cobra.Command {
 			if jsonOut {
 				enc := json.NewEncoder(out)
 				enc.SetIndent("", "  ")
-				// Never print secret references' resolved values — the refs
-				// themselves are safe (they are names, not values).
-				return enc.Encode(cfg.Webhooks)
+				// A display projection with json tags: refs are names, so
+				// printing them is safe — resolved secret values are never
+				// loaded here at all.
+				views := make([]webhookView, 0, len(cfg.Webhooks))
+				for _, w := range cfg.Webhooks {
+					timeout := w.Timeout.D()
+					if timeout == 0 {
+						timeout = config.DefaultWebhookTimeout.D()
+					}
+					views = append(views, webhookView{
+						Name: w.Name, URL: w.URL,
+						Timeout:   timeout.String(),
+						SecretRef: w.SecretRef,
+						Headers:   w.Headers,
+					})
+				}
+				return enc.Encode(views)
 			}
 			if len(cfg.Webhooks) == 0 {
 				fmt.Fprintln(out, "no webhooks; add one with `yukariko webhook add <name> --url <url>`.")
