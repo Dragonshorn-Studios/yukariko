@@ -1114,7 +1114,7 @@ apps: []
 			t.Fatalf("Parse: %v", err)
 		}
 		if !cfg.Auth.APIKeys.Enabled {
-			t.Error("api_keys.enabled did not survive the round trip")
+			t.Error("api_keys.enabled did not parse")
 		}
 		if cfg.Auth.OIDC.Enabled {
 			t.Error("api_keys must not enable oidc")

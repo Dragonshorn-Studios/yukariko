@@ -45,9 +45,6 @@ func TestAPIKeyLifecycle(t *testing.T) {
 	if err != nil || !ok || byID.TokenHash != hash {
 		t.Fatalf("APIKeyByID = %v, %v, %v; want same hash", byID, ok, err)
 	}
-	if byID.TokenHash != hash {
-		t.Errorf("APIKeyByID lost token hash: %q", byID.TokenHash)
-	}
 
 	// Unknown hash: absent, no error.
 	if _, ok, err := s.APIKeyByHash(ctx, "nope"); ok || err != nil {
@@ -68,6 +65,7 @@ func TestAPIKeyActiveStates(t *testing.T) {
 	}{
 		{"no expiry", APIKey{}, true},
 		{"future expiry", APIKey{ExpiresAt: &future}, true},
+		{"expiring exactly now", APIKey{ExpiresAt: &now}, false},
 		{"expired", APIKey{ExpiresAt: &past}, false},
 		{"revoked", APIKey{RevokedAt: &now}, false},
 		{"revoked beats future expiry", APIKey{ExpiresAt: &future, RevokedAt: &now}, false},

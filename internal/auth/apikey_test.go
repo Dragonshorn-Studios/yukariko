@@ -286,6 +286,43 @@ func TestAPIKeyKeysOnlyRejectsStaleSessions(t *testing.T) {
 	}
 }
 
+// The nothing-cached guarantee: a key that authenticated a moment ago must
+// stop working the moment it is revoked or expires — validation hits the
+// store on every request, so a per-server memo would break this test.
+func TestAPIKeyRevocationAndExpiryAreImmediate(t *testing.T) {
+	t.Parallel()
+	h := newKeyHarness(t, false)
+
+	// Revoke after successful use.
+	live := h.seedKey(t, "amadeus", nil)
+	if res, _ := h.get(t, "/api/v1/apps", live); res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api before revoke = %d, want 200", res.StatusCode)
+	}
+	k, ok, err := h.store.APIKeyByName(context.Background(), "amadeus")
+	if err != nil || !ok {
+		t.Fatalf("lookup: ok=%v err=%v", ok, err)
+	}
+	if ok, err := h.store.RevokeAPIKey(context.Background(), k.ID, h.clock.now); err != nil || !ok {
+		t.Fatalf("revoke: %v, %v", ok, err)
+	}
+	if res, _ := h.get(t, "/api/v1/apps", live); res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("GET /api after revoke = %d, want 401 immediately", res.StatusCode)
+	}
+
+	// Expiry crossing while the gate is serving.
+	expiring := h.seedKey(t, "temp", func(k *store.APIKey) {
+		future := h.clock.now.Add(time.Hour)
+		k.ExpiresAt = &future
+	})
+	if res, _ := h.get(t, "/api/v1/apps", expiring); res.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api before expiry = %d, want 200", res.StatusCode)
+	}
+	h.clock.now = h.clock.now.Add(2 * time.Hour)
+	if res, _ := h.get(t, "/api/v1/apps", expiring); res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("GET /api after expiry = %d, want 401", res.StatusCode)
+	}
+}
+
 func TestAPIKeyStoreFailureAnswers503(t *testing.T) {
 	t.Parallel()
 	h := newKeyHarness(t, false)
@@ -315,7 +352,7 @@ func TestAPIKeyCorruptRowFailsClosedAs401(t *testing.T) {
 
 	// Corrupt the row through a second handle on the same database file,
 	// simulating a foreign tool write.
-	db, err := sql.Open("sqlite", filepath.Join(h.dataDir, "yukariko.db"))
+	db, err := sql.Open("sqlite", filepath.Join(h.dataDir, store.DBFileName))
 	if err != nil {
 		t.Fatalf("open second handle: %v", err)
 	}

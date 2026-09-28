@@ -75,12 +75,42 @@ func TestAPIKeyCreatePrintsTokenOnce(t *testing.T) {
 func TestAPIKeyCreateWithExpiry(t *testing.T) {
 	t.Parallel()
 	cfg, dataDir := apiKeyTestEnv(t)
+	before := time.Now().UTC().Add(-time.Minute)
 	out, code, err := runAPIKey(t, "apikey", "create", "--config", cfg, "--data-dir", dataDir, "--name", "temp", "--expires", "720h", "--json")
 	if code != exitcode.OK || err != nil {
 		t.Fatalf("apikey create = %d (%v); out: %s", code, err, out)
 	}
-	if !strings.Contains(out, "expires_at") {
-		t.Errorf("create output missing expires_at: %s", out)
+	var created struct {
+		Token     string     `json:"token"`
+		ExpiresAt *time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal([]byte(out), &created); err != nil {
+		t.Fatalf("decode create output %q: %v", out, err)
+	}
+	// The expiry must be roughly now+720h and in the future — a sign flip
+	// or wrong epoch would leave the key born expired.
+	if created.ExpiresAt == nil {
+		t.Fatal("expires_at missing")
+	}
+	if want := before.Add(720 * time.Hour); created.ExpiresAt.Before(want) {
+		t.Errorf("expires_at = %v, want at least %v (now+720h)", created.ExpiresAt.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+	if !created.ExpiresAt.After(time.Now().UTC()) {
+		t.Errorf("expires_at = %v is not in the future", created.ExpiresAt.Format(time.RFC3339))
+	}
+
+	// The stored row carries the same future expiry.
+	st, err := store.Open(dataDir)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer st.Close()
+	k, ok, err := st.APIKeyByName(context.Background(), "temp")
+	if err != nil || !ok {
+		t.Fatalf("APIKeyByName: ok=%v err=%v", ok, err)
+	}
+	if k.ExpiresAt == nil || !k.ExpiresAt.Equal(*created.ExpiresAt) {
+		t.Errorf("stored expires_at = %v, want %v", k.ExpiresAt, created.ExpiresAt)
 	}
 }
 
@@ -155,6 +185,13 @@ func TestAPIKeyListAndRevoke(t *testing.T) {
 	out, code, err = runAPIKey(t, "apikey", "revoke", "amadeus", "--config", cfg, "--data-dir", dataDir)
 	if code != exitcode.OK || err != nil || !strings.Contains(out, "already revoked") {
 		t.Errorf("second revoke = %d (%v): %s; want idempotent OK", code, err, out)
+	}
+
+	// Revoke by id exercises the APIKeyByID fallback (the common flow after
+	// copying an id from `apikey list`).
+	out, code, err = runAPIKey(t, "apikey", "revoke", views[1].ID, "--config", cfg, "--data-dir", dataDir)
+	if code != exitcode.OK || err != nil || !strings.Contains(out, "revoked") {
+		t.Errorf("revoke by id = %d (%v): %s; want OK", code, err, out)
 	}
 
 	// Unknown reference errors.
