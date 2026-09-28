@@ -19,6 +19,7 @@ state-only.**
 | Published dashboard/API (optional OIDC, #61) | Session theft, token forgery, login CSRF/replay, open redirect, provider spoofing | Authorization code + PKCE (S256); ID tokens verified in-binary (JWKS signature with kid rotation, issuer, audience, expiry via go-oidc with an RS256/ES256 allowlist; nonce compared by Yukariko against the single-use pending row — go-oidc deliberately does not check nonce) — never a hand-rolled verifier and never reverse-proxy headers; `state`/`nonce`/verifier are single-use server-side rows with a 10-minute TTL, and sessions are server-side rows keyed by a SHA-256-hashed 256-bit cookie token (HttpOnly, SameSite=Lax, Secure + `__Host-` prefix on https origins) — a database copy resurrects nothing; the post-login redirect is local-only (absolute, protocol-relative, `/auth`-prefixed, and backslash-carrying targets are all refused); optional `allowed_groups` enforces a default-deny membership check in Yukariko itself; issuer and external origin must be https (loopback http for tests); the client secret resolves only at token exchange |
 | API keys (#64) | Bearer token theft, key sprawl, silent revocation gaps | Keys are 256-bit random `ykr_`-prefixed tokens shown once at creation and stored as SHA-256 hashes only — a database copy resurrects nothing; validation hits the store on every request, so revocation/expiry is immediate and uncached; presented-but-invalid credentials fail closed (no session fallback); keys unlock only the read-only API, never `/ui` or the report channel; the `ykr_` token shape is a runner redaction pattern; enabling requires `server.enabled` |
 | Supply chain | Third-party assets/dependencies | Stdlib-first (five direct deps: cobra, yaml.v3, modernc sqlite, go-oidc, x/oauth2 — the last two are the vetted OIDC relying-party pair, chosen deliberately over hand-rolling auth verification); original assets only, inventoried in docs/ASSETS.md |
+| Outbound webhooks (#65) | SSRF by config injection, secret leakage, payload abuse | Targets exist only in operator-owned YAML (the HTTP surface is read-only; there is no registration route), validated to https-or-loopback with no userinfo; signing secrets are SecretRefs resolved at send time and never logged or stored; payloads are bounded, versioned state descriptions that can never select or provide commands; delivery failures cannot affect deployments |
 
 ## Security checklist (release review)
 
@@ -44,6 +45,11 @@ state-only.**
       SHA-256 of each token is stored, revocation is immediate, and a
       presented-but-invalid credential never falls back to a session —
       verified by the middleware matrix and store tests.
+- [x] Webhook deliveries (#65) are persisted before send (at-least-once),
+      signed with a send-time SecretRef via constant-time HMAC comparison
+      on receivers' own verification, capped in size and attempts, and
+      inert by construction — verified by golden-signature, retry,
+      Retry-After, abandonment, and removed-target tests.
 - [x] Deploy checkpoints advance only inside a store transaction after
       required health checks; cancellation cannot record success.
 - [x] Docker daemon access is documented as root-equivalent
@@ -81,3 +87,10 @@ state-only.**
   peer; key requests are not rate-limited at all beyond what a listener's
   network position provides. The API is read-only and bounded, so this is
   an exposure consideration, not a mutation risk.
+- Webhook targets are operator-trusted endpoints: whoever can write the
+  config file can already run arbitrary deploy commands, so a malicious
+  target gains nothing it could not do directly — but Yukariko will POST
+  deployment state (app ids, versions, hostnames) anywhere the config
+  names, and deliveries are retried against that target for up to 8
+  attempts. Signing is optional: an unsigned delivery is tamper-evident
+  only on transports the operator already trusts.

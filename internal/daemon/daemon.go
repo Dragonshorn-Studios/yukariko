@@ -31,6 +31,7 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
 	"github.com/Dragonshorn-Studios/yukariko/internal/ui"
+	"github.com/Dragonshorn-Studios/yukariko/internal/webhooks"
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
@@ -81,6 +82,10 @@ type Assembled struct {
 	// Reporter is non-nil when outbound reporting is enabled; the daemon
 	// runs its drain loop and local sinks enqueue through it.
 	Reporter *report.Reporter
+	// Webhooks is non-nil when webhook targets are configured (issue #65);
+	// the daemon runs its drain loop and the event sink enqueues
+	// deployment outcomes through it.
+	Webhooks *webhooks.Dispatcher
 	// UI is the embedded read-only dashboard; always present.
 	UI http.Handler
 }
@@ -174,13 +179,14 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	if preflight == nil {
 		preflight = &schedule.Preflight{DataDir: opts.DataDir, DefaultEndpoint: cfg.Docker}
 	}
+	hookDispatcher := webhookDispatcherFor(opts.Config, st)
 	schedOpts := schedule.Options{
 		Apps:      apps,
 		DataDir:   opts.DataDir,
 		Check:     checker,
 		Deploy:    dispatcher,
 		Preflight: preflight,
-		Sink:      &eventSink{store: st, reporter: reporter},
+		Sink:      &eventSink{store: st, reporter: reporter, webhooks: hookDispatcher},
 	}
 	sched := schedule.New(schedOpts)
 	monitor := &health.Monitor{
@@ -217,6 +223,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		ReportHandler: reportHandler,
 		Reporter:      reporter,
 		Authenticator: authenticator,
+		Webhooks:      hookDispatcher,
 	}, nil
 }
 
@@ -279,6 +286,27 @@ func authenticatorFor(cfg *config.Config, st *store.Store) *auth.Server {
 		return nil
 	}
 	return &auth.Server{OIDC: cfg.Auth.OIDC, APIKeys: cfg.Auth.APIKeys.Enabled, Store: st, Log: slog.Default()}
+}
+
+// webhookDispatcherFor builds the outbound webhook dispatcher when the
+// configuration registers targets (issue #65); nil means none configured
+// and nothing enqueues. The payload's host field is the machine hostname;
+// webhook delivery shares nothing with outbound reporting.
+func webhookDispatcherFor(cfg *config.Config, st *store.Store) *webhooks.Dispatcher {
+	if len(cfg.Webhooks) == 0 {
+		return nil
+	}
+	host, err := os.Hostname()
+	if err != nil {
+		host = ""
+	}
+	return &webhooks.Dispatcher{
+		Store:  st,
+		Hooks:  cfg.Webhooks,
+		Host:   host,
+		Sender: &webhooks.Sender{},
+		Log:    slog.Default(),
+	}
 }
 
 // --- source checking --------------------------------------------------------
@@ -532,6 +560,7 @@ func (s *commandRunSink) RecordCommandSummary(ctx context.Context, sum runner.Su
 type eventSink struct {
 	store    *store.Store
 	reporter *report.Reporter
+	webhooks *webhooks.Dispatcher
 }
 
 func (s *eventSink) RecordAppEvent(ctx context.Context, e schedule.Event) error {
@@ -543,16 +572,25 @@ func (s *eventSink) RecordAppEvent(ctx context.Context, e schedule.Event) error 
 		Time: e.Time, AppID: e.AppID, Level: level, Kind: e.Kind, Message: e.Detail,
 	})
 	// Deployment outcomes are reported outbound (audit events: never
-	// coalesced or dropped). Check outcomes are not — heartbeats carry
-	// liveness.
-	if s.reporter != nil && e.Kind == schedule.EventState &&
+	// coalesced or dropped) and fanned out to configured webhooks. Check
+	// outcomes are not — heartbeats carry liveness.
+	if e.Kind == schedule.EventState &&
 		(e.To == schedule.StateSucceeded || e.To == schedule.StateFailed) && e.From == schedule.StateDeploying {
 		status := "succeeded"
 		if e.To == schedule.StateFailed {
 			status = "failed"
 		}
-		if err := s.reporter.EnqueueDeployment(ctx, e.AppID, e.Detail, status); err != nil {
-			return err
+		if s.reporter != nil {
+			if err := s.reporter.EnqueueDeployment(ctx, e.AppID, e.Detail, status); err != nil {
+				return err
+			}
+		}
+		// Webhook enqueue failures are logged and never fatal: delivery
+		// must not be able to fail a deployment pass (issue #65).
+		if s.webhooks != nil {
+			if hErr := s.webhooks.EnqueueDeployment(ctx, e.AppID, e.Detail, status); hErr != nil {
+				slog.Warn("enqueue webhook deliveries", "app", e.AppID, "error", hErr)
+			}
 		}
 	}
 	return err

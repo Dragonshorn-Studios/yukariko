@@ -601,7 +601,12 @@ func (f *flow) merge(original []byte, existed bool, apps []config.App) ([]byte, 
 // ownership: a root `yukariko learn` must not leave a config the systemd
 // service user can no longer read.
 func (f *flow) write(original []byte, existed bool, newBytes []byte) (backupPath string, err error) {
-	path := f.opts.ConfigPath
+	return writeFile(f.opts.ConfigPath, f.opts.Now, original, existed, newBytes)
+}
+
+// writeFile is the path-parameterized core of write, shared with the
+// non-interactive config editor (ApplyConfigEdit).
+func writeFile(path string, now time.Time, original []byte, existed bool, newBytes []byte) (backupPath string, err error) {
 	mode := fs.FileMode(0o644)
 	uid, gid := -1, -1
 	if existed {
@@ -609,7 +614,6 @@ func (f *flow) write(original []byte, existed bool, newBytes []byte) (backupPath
 			mode = fi.Mode().Perm()
 			uid, gid = fileOwner(fi)
 		}
-		now := f.opts.Now
 		if now.IsZero() {
 			now = time.Now()
 		}

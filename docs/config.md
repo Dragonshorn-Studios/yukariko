@@ -310,6 +310,58 @@ nothing is cached). The dashboard (`/ui`) is never unlocked by API keys, and
 `/report/v1/events` keeps its HMAC channel regardless. With the feature off
 the HTTP surface behaves exactly as before.
 
+## Webhooks
+
+```yaml
+webhooks:
+  - name: amadeus
+    url: https://amadeus.example.com/hooks/yukariko
+    secret_ref: {env: AMADEUS_HOOK_SECRET}   # optional HMAC signing key
+    timeout: 15s                             # per attempt, 1s..60s
+    headers:                                 # optional static headers
+      - {name: X-Tenant, value: ops}
+      - {name: Authorization, secret_ref: {file: /etc/yukariko/secrets/hook-auth}}
+```
+
+Outbound deployment notifications (issue #65). Every configured target
+receives a signed `POST` (JSON) shortly after any app's deployment succeeds
+or fails — nothing else triggers a delivery, and no event carries commands.
+The body is a bounded, versioned state description:
+
+```json
+{
+  "version": 1,
+  "event": "deployment.succeeded",
+  "host": "docker01",
+  "app": "web",
+  "deployment": {
+    "id": "…", "cause": "scheduled",
+    "from_version": "…", "to_version": "…",
+    "status": "succeeded", "started_at": "…", "ended_at": "…"
+  },
+  "detail": "pull; up -d --wait",
+  "time": "2026-09-28T12:00:00Z"
+}
+```
+
+Delivery is at-least-once from a durable queue in the data dir: the attempt
+is persisted before the network call, so a crash mid-flight is redelivered
+on restart. Failures back off exponentially with jitter; a receiver
+`Retry-After` wins when longer; after 8 attempts the delivery is abandoned
+with its final error kept for diagnosis (a receiver `410` retires it
+early). Enqueue and delivery failures never affect the deployment itself —
+the only coupling to the deploy path is a local insert. Removing a target
+from the configuration retires its queued deliveries at the next drain.
+
+When `secret_ref` is set, deliveries carry `X-Yukariko-Signature`:
+`v1=hex(HMAC-SHA256(key, "<unix-seconds>." + sha256hex(body)))` plus
+`X-Yukariko-Timestamp` (the same unix seconds), `X-Yukariko-Event`, and
+`X-Yukariko-Delivery` (a stable per-delivery id, useful as an idempotency
+key). The secret is a reference only, resolved at send time, never logged
+or stored. URLs must be https (plain http is a loopback test affordance),
+carry no userinfo, and names must be unique. Targets are operator-trusted
+endpoints: registering one asks Yukariko to POST state there, nothing more.
+
 ## Validation summary
 
 Rejected with path-aware errors: unknown/duplicate fields, unsupported or
@@ -322,7 +374,10 @@ and key references, an `auth.oidc` section that enables itself without
 `server.enabled`, an issuer, a client id, a secret reference, or an external
 `redirect_base` (or that carries non-https origins off loopback, origins
 with a path, scopes without `openid`, a `session_ttl` outside 1m–720h, or
-empty group names), `auth.api_keys` enabled without `server.enabled`, and
+empty group names), `auth.api_keys` enabled without `server.enabled`,
+webhooks with empty/duplicate names, non-https URLs off loopback, userinfo
+in a URL, timeouts outside 1s–60s, or headers without exactly one of a
+plain value or a secret reference, and
 Docker endpoints setting both `context` and `host`
 or carrying a host without a `unix://`, `tcp://`, `ssh://`, or `npipe://`
 scheme.

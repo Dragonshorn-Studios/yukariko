@@ -34,6 +34,7 @@ type Config struct {
 	Retention     Retention       `yaml:"retention,omitempty"`
 	Limits        Limits          `yaml:"limits,omitempty"`
 	Docker        *DockerEndpoint `yaml:"docker,omitempty"`
+	Webhooks      []Webhook       `yaml:"webhooks,omitempty"`
 	Apps          []App           `yaml:"apps,omitempty"`
 }
 
@@ -79,6 +80,9 @@ const (
 	DefaultRetentionEvents    = 30                         // days
 	DefaultRetentionHealth    = 14                         // days
 	DefaultRetentionDeploys   = 365                        // days
+
+	// Outbound webhooks (issue #65).
+	DefaultWebhookTimeout = Duration(15 * time.Second) // 15s
 
 	// OIDC authentication (issue #61).
 	DefaultOIDCSessionTTL = Duration(12 * time.Hour) // 12h
@@ -196,6 +200,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	c.Reporting.ApplyDefaults()
 	c.Auth.ApplyDefaults()
+	for i := range c.Webhooks {
+		c.Webhooks[i].ApplyDefaults()
+	}
 	for i := range c.Apps {
 		c.Apps[i].ApplyDefaults()
 	}
