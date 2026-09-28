@@ -201,4 +201,26 @@ CREATE TABLE api_keys (
 );
 `,
 	},
+	{
+		version: 5,
+		ddl: `
+-- Outbound webhook deliveries (#65). One row per (webhook, deployment
+-- outcome), persisted BEFORE any network I/O so a crash mid-flight leaves
+-- the row pending and it is redelivered on restart (at-least-once).
+-- abandoned marks deliveries past the attempt cap; last_error carries the
+-- final diagnosis. Payloads are inert state descriptions only.
+CREATE TABLE webhook_deliveries (
+	id TEXT PRIMARY KEY,
+	webhook TEXT NOT NULL,
+	event TEXT NOT NULL,
+	payload TEXT NOT NULL,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	state TEXT NOT NULL CHECK (state IN ('pending','delivered','abandoned')),
+	available_at TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	last_error TEXT
+);
+CREATE INDEX idx_webhook_deliveries_pending ON webhook_deliveries(state, available_at);
+`,
+	},
 }

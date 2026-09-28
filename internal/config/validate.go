@@ -39,6 +39,7 @@ func (c *Config) Validate() error {
 	validateDockerEndpoint(v, "docker", c.Docker)
 	validateReporting(v, &c.Reporting)
 	validateAuth(v, c)
+	validateWebhooks(v, c.Webhooks)
 
 	seenIDs := make(map[string]bool, len(c.Apps))
 	seenTargets := make(map[string]string)
@@ -434,6 +435,54 @@ func validateAuth(v *validator, c *Config) {
 	}
 }
 
+// validateWebhooks enforces the outbound webhook contract (issue #65):
+// unique non-empty names, https URLs (loopback http is a test affordance),
+// no userinfo (credentials never ride in URLs), bounded timeouts, and
+// header values that are exactly one of a plain value or a secret
+// reference. Targets are operator-trusted endpoints; validation mirrors the
+// reporting/issuer doctrine so a typo cannot aim deliveries off-host.
+func validateWebhooks(v *validator, hooks []Webhook) {
+	seen := make(map[string]bool, len(hooks))
+	for i := range hooks {
+		w := &hooks[i]
+		path := fmt.Sprintf("webhooks[%d]", i)
+		if w.Name == "" {
+			v.errorf(path+".name", "is required")
+		} else if !keyIDPattern.MatchString(w.Name) {
+			v.errorf(path+".name", "must match %q", keyIDPattern.String())
+		} else if seen[w.Name] {
+			v.errorf(path+".name", "duplicate webhook name %q; webhook names must be unique", w.Name)
+		} else {
+			seen[w.Name] = true
+		}
+		u, err := url.Parse(w.URL)
+		switch {
+		case err != nil || u.Host == "":
+			v.errorf(path+".url", "must be an absolute URL, got %q", w.URL)
+		case u.Scheme != "https" && !isLoopbackHost(u):
+			v.errorf(path+".url", "must use https (plain http is allowed only on loopback hosts for tests), got %q", u.Scheme)
+		case u.User != nil:
+			v.errorf(path+".url", "must not carry userinfo; credentials are never embedded in URLs")
+		}
+		if w.SecretRef != nil {
+			validateSecretRef(v, path+".secret_ref", w.SecretRef)
+		}
+		if ttl := w.Timeout.D(); ttl < time.Second || ttl > 60*time.Second {
+			v.errorf(path+".timeout", "must be between 1s and 60s, got %s", ttl)
+		}
+		for j := range w.Headers {
+			h := &w.Headers[j]
+			hp := fmt.Sprintf("%s.headers[%d]", path, j)
+			if h.Name == "" || !headerNamePattern.MatchString(h.Name) {
+				v.errorf(hp+".name", "must be a valid HTTP header name, got %q", h.Name)
+			} else if reservedWebhookHeader(h.Name) {
+				v.errorf(hp+".name", "is reserved by Yukariko (content type and X-Yukariko-* are computed per delivery)")
+			}
+			validateValueOrRef(v, hp, h.Value, h.SecretRef)
+		}
+	}
+}
+
 func validateSecretRef(v *validator, path string, s *SecretRef) {
 	switch {
 	case s.Env != "" && s.File != "":
@@ -582,8 +631,19 @@ func validPortNumber(s string) error {
 	return nil
 }
 
+// reservedWebhookHeader reports whether a static delivery header would
+// collide with one Yukariko computes per delivery (the signature block and
+// content type). Static headers are applied first and must not be able to
+// shadow the computed ones.
+func reservedWebhookHeader(name string) bool {
+	const prefix = "X-Yukariko-"
+	return strings.EqualFold(name, "Content-Type") ||
+		(len(name) >= len(prefix) && strings.EqualFold(name[:len(prefix)], prefix))
+}
+
 // isLoopbackHost reports whether a URL targets localhost; plain http is
 // allowed there for tests only.
+
 func isLoopbackHost(u *url.URL) bool {
 	h := u.Hostname()
 	return h == "127.0.0.1" || h == "localhost" || h == "::1"

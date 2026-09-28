@@ -32,7 +32,12 @@ func (a *Assembled) Restart(ctx context.Context, appID string) error {
 	}
 	defer release()
 
-	depID, err := a.Deployer.claimDeploymentCause(ctx, app, "restart")
+	// The version kind follows the app's source mode, mirroring Deploy.
+	kind := store.KindDigest
+	if app.Source.Mode == config.SourceGit {
+		kind = store.KindGitSHA
+	}
+	depID, err := a.Deployer.claimDeploymentCause(ctx, app, "restart", kind)
 	if err != nil {
 		a.recordRestart(ctx, appID, store.LevelWarn, "restart refused: "+err.Error())
 		return err

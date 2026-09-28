@@ -266,6 +266,46 @@ Revocation takes effect immediately; keys may carry an expiry
 accepts either a session (browsers) or a key (machines). Enabling
 `auth.api_keys` requires `server.enabled`.
 
+## Webhooks
+
+Register a target once and it receives a signed POST on every deployment
+outcome (issue #65):
+
+```console
+$ yukariko webhook add amadeus \
+    --url https://amadeus.example.com/hooks/yukariko \
+    --secret-ref env:AMADEUS_HOOK_SECRET \
+    --header X-Tenant=ops
+$ yukariko webhook list
+$ yukariko webhook remove amadeus
+```
+
+The commands edit `yukariko.yaml` atomically — a timestamped backup is
+written, the result is validated with the same parser that loads
+configuration, and only then does the file get replaced — so a failed
+command always leaves the file byte-identical. Restart the daemon after
+editing for the change to take effect.
+
+Verifying a delivery on the receiving side (Python, stdlib only):
+
+```python
+import hmac, hashlib, json
+ts   = request.headers["X-Yukariko-Timestamp"]
+sig  = request.headers["X-Yukariko-Signature"]          # "v1=<hex>"
+body = request.get_data()                               # exact bytes
+expect = "v1=" + hmac.new(SECRET, ts.encode() + b"." +
+          hashlib.sha256(body).hexdigest().encode(),
+          hashlib.sha256).hexdigest()
+ok = hmac.compare_digest(sig, expect)
+```
+
+Reject deliveries older than a few minutes (compare `X-Yukariko-Timestamp`
+to local time) and deduplicate on `X-Yukariko-Delivery` — redelivery after
+a crash can repeat an event. Answer `2xx` to accept, `410` to say "stop
+sending this", and use `Retry-After` on failures to pace retries; after 8
+failed attempts Yukariko abandons a delivery (the error stays in the queue
+row for diagnosis). Delivery never blocks or fails a deployment.
+
 ## Retention
 
 `retention.events_days` (default 30), `health_days` (14),

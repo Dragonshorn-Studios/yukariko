@@ -128,6 +128,13 @@ func (a *App) newRunCommand() *cobra.Command {
 					asm.Reporter.Run(ctx)
 				}()
 			}
+			if asm.Webhooks != nil {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					asm.Webhooks.Run(ctx)
+				}()
+			}
 			runErr := asm.Scheduler.Run(ctx)
 			wg.Wait()
 			if runErr == nil {
