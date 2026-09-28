@@ -99,7 +99,12 @@ func (s *Sender) Send(ctx context.Context, hook config.Webhook, event, deliveryI
 
 	client := s.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		// Redirects are answered as-is to the dispatcher's classifier: the
+		// signature binds this delivery to this target, and following a
+		// 3xx would re-send payload and headers to an unvalidated host.
+		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}}
 	}
 	res, err := client.Do(req)
 	if err != nil {

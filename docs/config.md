@@ -346,7 +346,10 @@ The body is a bounded, versioned state description:
 
 Delivery is at-least-once from a durable queue in the data dir: the attempt
 is persisted before the network call, so a crash mid-flight is redelivered
-on restart. Failures back off exponentially with jitter; a receiver
+on restart. `to_version` is the version a succeeded deploy committed; a
+failed deployment leaves it empty (nothing became deployed) while
+`from_version` records what was deployed before the attempt. Failures back
+off exponentially with jitter; a receiver
 `Retry-After` wins when longer; after 8 attempts the delivery is abandoned
 with its final error kept for diagnosis (a receiver `410` retires it
 early). Enqueue and delivery failures never affect the deployment itself —

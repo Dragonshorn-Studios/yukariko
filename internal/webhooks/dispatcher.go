@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/config"
@@ -46,6 +47,9 @@ type Dispatcher struct {
 
 	kick chan struct{}
 	once sync.Once
+	// markFailed flags a failed outcome write for the drain loop: the row
+	// stays claimable, so the pass must stop instead of hot-retrying it.
+	markFailed atomic.Bool
 }
 
 func (d *Dispatcher) log() *slog.Logger {
@@ -202,6 +206,12 @@ func (d *Dispatcher) drainAll(ctx context.Context) {
 				return
 			}
 			d.deliverOne(ctx, delivery)
+			// A failed outcome write leaves the row claimable; continuing
+			// would hot-retry it with no backoff applied. End this pass and
+			// wait for the next wake.
+			if d.markFailed.Swap(false) {
+				return
+			}
 		}
 	}
 }
@@ -221,8 +231,9 @@ func (d *Dispatcher) deliverOne(ctx context.Context, delivery store.WebhookDeliv
 		d.retryOrAbandon(ctx, delivery, err.Error())
 		return
 	case att.Delivered:
-		if mErr := d.Store.MarkWebhookDelivered(ctx, delivery.ID, d.now()); mErr != nil {
+		if mErr := d.Store.MarkWebhookDelivered(ctx, delivery.ID); mErr != nil {
 			d.log().Error("mark webhook delivered", "delivery", delivery.ID, "error", mErr)
+			d.markFailed.Store(true)
 		}
 		return
 	case att.Abandon:
@@ -263,6 +274,7 @@ func (d *Dispatcher) retryOrAbandon(ctx context.Context, delivery store.WebhookD
 	next := d.now().Add(backoff)
 	if mErr := d.Store.MarkWebhookRetry(ctx, delivery.ID, next, failure); mErr != nil {
 		d.log().Error("mark webhook retry", "delivery", delivery.ID, "error", mErr)
+		d.markFailed.Store(true)
 	}
 }
 
@@ -271,5 +283,6 @@ func (d *Dispatcher) retryOrAbandon(ctx context.Context, delivery store.WebhookD
 func (d *Dispatcher) retire(ctx context.Context, delivery store.WebhookDelivery, format string, args ...any) {
 	if mErr := d.Store.MarkWebhookAbandoned(ctx, delivery.ID, fmt.Sprintf(format, args...)); mErr != nil {
 		d.log().Error("mark webhook abandoned", "delivery", delivery.ID, "error", mErr)
+		d.markFailed.Store(true)
 	}
 }

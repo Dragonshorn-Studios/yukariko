@@ -80,7 +80,7 @@ func (s *Store) ClaimableWebhookDeliveries(ctx context.Context, now time.Time, l
 // MarkWebhookDelivered records success. The state guard keeps a row that
 // was abandoned (or already delivered) from being flipped by a late
 // response.
-func (s *Store) MarkWebhookDelivered(ctx context.Context, id string, at time.Time) error {
+func (s *Store) MarkWebhookDelivered(ctx context.Context, id string) error {
 	return s.markWebhook(ctx, id,
 		`UPDATE webhook_deliveries SET state = ?, attempts = attempts + 1, last_error = NULL
 		  WHERE id = ? AND state = ?`,

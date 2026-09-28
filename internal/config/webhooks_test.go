@@ -139,6 +139,30 @@ apps: []
 			want: "webhooks[0].headers[0]: must set either value or secret_ref, not both",
 		},
 		{
+			name: "reserved header name",
+			doc: `
+schema_version: 1
+webhooks:
+  - name: amadeus
+    url: "https://a.example.com/h"
+    headers: [{name: X-Yukariko-Signature, value: forged}]
+apps: []
+`,
+			want: "webhooks[0].headers[0].name: is reserved by Yukariko",
+		},
+		{
+			name: "reserved content type",
+			doc: `
+schema_version: 1
+webhooks:
+  - name: amadeus
+    url: "https://a.example.com/h"
+    headers: [{name: content-type, value: text/plain}]
+apps: []
+`,
+			want: "webhooks[0].headers[0].name: is reserved by Yukariko",
+		},
+		{
 			name: "invalid header name",
 			doc: `
 schema_version: 1

@@ -154,8 +154,8 @@ func (s *Store) CommitDeploymentSuccess(ctx context.Context, appID, kind, value,
 		return fmt.Errorf("%w: %s", ErrDeploymentNotRunning, deploymentID)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE deployments SET status = ?, ended_at = ?, error = NULL WHERE id = ?`,
-		StatusSucceeded, rfc3339(at), deploymentID); err != nil {
+		`UPDATE deployments SET status = ?, ended_at = ?, error = NULL, to_version = ? WHERE id = ?`,
+		StatusSucceeded, rfc3339(at), value, deploymentID); err != nil {
 		return fmt.Errorf("commit deployment success: update deployment: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,

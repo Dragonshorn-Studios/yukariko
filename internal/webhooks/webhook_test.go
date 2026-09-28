@@ -152,6 +152,32 @@ func writeSecret(t *testing.T, value string) string {
 	return path
 }
 
+// A 3xx is never followed: the signature binds the delivery to the
+// configured target, and following would re-send payload and headers to an
+// unvalidated host. The redirect status falls to the retry classifier.
+func TestSenderDoesNotFollowRedirects(t *testing.T) {
+	t.Parallel()
+	var hops atomic.Int32
+	onward := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hops.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(onward.Close)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, onward.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+
+	s := &Sender{}
+	att, err := s.Send(context.Background(), config.Webhook{Name: "h", URL: srv.URL, Timeout: config.Duration(time.Second)}, "e", "d", []byte("{}"))
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if att.Delivered || hops.Load() != 0 {
+		t.Errorf("redirect followed: delivered=%v onwardHits=%d; want no follow", att.Delivered, hops.Load())
+	}
+}
+
 func TestSenderClassification(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -235,7 +261,7 @@ func TestEnqueuePersistsBeforeSend(t *testing.T) {
 		if p.Version != PayloadVersion || p.Event != EventDeploymentSucceeded || p.App != "web" {
 			t.Errorf("payload = %+v", p)
 		}
-		if p.Deployment.ToVersion != "bbbbbbbbbbbb" || p.Deployment.ID == "" {
+		if p.Deployment.FromVersion != "aaaaaaaaaaaa" || p.Deployment.ToVersion != "sha256:deadbeef" || p.Deployment.ID == "" {
 			t.Errorf("deployment block = %+v; want full versions and id", p.Deployment)
 		}
 	}

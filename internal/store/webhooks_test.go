@@ -30,7 +30,7 @@ func TestWebhookDeliveryLifecycle(t *testing.T) {
 	}
 
 	// Delivered is terminal and bumps attempts.
-	if err := s.MarkWebhookDelivered(ctx, d.ID, now); err != nil {
+	if err := s.MarkWebhookDelivered(ctx, d.ID); err != nil {
 		t.Fatalf("MarkWebhookDelivered: %v", err)
 	}
 	if claim, _ := s.ClaimableWebhookDeliveries(ctx, now, 10); len(claim) != 0 {
@@ -41,7 +41,7 @@ func TestWebhookDeliveryLifecycle(t *testing.T) {
 	}
 
 	// A late second delivery on a terminal row errors (state guard).
-	if err := s.MarkWebhookDelivered(ctx, d.ID, now); err == nil {
+	if err := s.MarkWebhookDelivered(ctx, d.ID); err == nil {
 		t.Error("double-delivery must error")
 	}
 }

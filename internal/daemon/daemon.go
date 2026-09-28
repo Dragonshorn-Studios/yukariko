@@ -419,7 +419,7 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 	if app.Source.Mode == config.SourceGit {
 		kind = store.KindGitSHA
 	}
-	depID, err := d.claimDeploymentCause(ctx, app, "update")
+	depID, err := d.claimDeploymentCause(ctx, app, "update", kind)
 	if err != nil {
 		return schedule.DeployResult{}, err
 	}
@@ -480,19 +480,25 @@ func deploymentBudget(app *config.App) time.Duration {
 	return budget + 5*time.Minute
 }
 
-// claimDeployment opens the app's single running deployment row. The
+// claimDeploymentCause opens the app's single running deployment row. The
 // partial unique index makes this the cross-process counterpart of the
 // scheduler's in-memory per-app lock: when another pass (daemon or manual
 // CLI) holds a fresh row, this pass bails with a clear message; when the
 // row is older than any live pass could be, the owning process is gone
 // and the row is reaped so one crash cannot block the app forever.
-func (d *DeployDispatcher) claimDeploymentCause(ctx context.Context, app *config.App, cause string) (string, error) {
+// versionKind records the pre-deploy checkpoint on the row's from_version
+// so deployment records (and webhook payloads) carry real versions.
+func (d *DeployDispatcher) claimDeploymentCause(ctx context.Context, app *config.App, cause, versionKind string) (string, error) {
 	if cause == "" {
 		cause = "update"
 	}
+	from, _, _, err := d.store.DeployedVersion(ctx, app.ID, versionKind)
+	if err != nil {
+		return "", err
+	}
 	begin := func() (string, error) {
 		return d.store.BeginDeployment(ctx, store.BeginDeploymentParams{
-			AppID: app.ID, Cause: cause, At: time.Now(),
+			AppID: app.ID, Cause: cause, FromVersion: from, At: time.Now(),
 		})
 	}
 	depID, err := begin()

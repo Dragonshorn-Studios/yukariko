@@ -475,6 +475,8 @@ func validateWebhooks(v *validator, hooks []Webhook) {
 			hp := fmt.Sprintf("%s.headers[%d]", path, j)
 			if h.Name == "" || !headerNamePattern.MatchString(h.Name) {
 				v.errorf(hp+".name", "must be a valid HTTP header name, got %q", h.Name)
+			} else if reservedWebhookHeader(h.Name) {
+				v.errorf(hp+".name", "is reserved by Yukariko (content type and X-Yukariko-* are computed per delivery)")
 			}
 			validateValueOrRef(v, hp, h.Value, h.SecretRef)
 		}
@@ -631,6 +633,16 @@ func validPortNumber(s string) error {
 
 // isLoopbackHost reports whether a URL targets localhost; plain http is
 // allowed there for tests only.
+// reservedWebhookHeader reports whether a static delivery header would
+// collide with one Yukariko computes per delivery (the signature block and
+// content type). Static headers are applied first and must not be able to
+// shadow the computed ones.
+func reservedWebhookHeader(name string) bool {
+	const prefix = "X-Yukariko-"
+	return strings.EqualFold(name, "Content-Type") ||
+		(len(name) >= len(prefix) && strings.EqualFold(name[:len(prefix)], prefix))
+}
+
 func isLoopbackHost(u *url.URL) bool {
 	h := u.Hostname()
 	return h == "127.0.0.1" || h == "localhost" || h == "::1"
