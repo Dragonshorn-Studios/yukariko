@@ -124,6 +124,10 @@ func TestAPIKeyCreateRejectsBadNameAndDuplicates(t *testing.T) {
 	if _, code, err := runAPIKey(t, "apikey", "create", "--config", cfg, "--data-dir", dataDir, "--name", "ok", "--expires", "nope"); code != exitcode.Usage {
 		t.Errorf("invalid expires exit = %d (%v), want %d", code, err, exitcode.Usage)
 	}
+	// A missing required flag is cobra-side validation: still Usage.
+	if _, code, err := runAPIKey(t, "apikey", "create", "--config", cfg, "--data-dir", dataDir); code != exitcode.Usage {
+		t.Errorf("missing --name exit = %d (%v), want %d", code, err, exitcode.Usage)
+	}
 	if _, code, err := runAPIKey(t, "apikey", "create", "--config", cfg, "--data-dir", dataDir, "--name", "amadeus"); code != exitcode.OK {
 		t.Fatalf("first create = %d (%v), want OK", code, err)
 	}

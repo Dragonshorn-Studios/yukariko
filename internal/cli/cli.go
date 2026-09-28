@@ -151,6 +151,8 @@ func isUsageError(err error) bool {
 		return true
 	case strings.Contains(s, "flag needs an argument"):
 		return true
+	case strings.Contains(s, "required flag"):
+		return true
 	case strings.Contains(s, "accepts"):
 		return true
 	default:
