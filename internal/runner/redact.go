@@ -14,19 +14,24 @@ const replacement = "[REDACTED]"
 // Values are matched literally; the redactor never logs or renders the
 // values themselves.
 type Redactor struct {
-	secrets []string
-	urlCred *regexp.Regexp
-	header  *regexp.Regexp
-	query   *regexp.Regexp
+	secrets  []string
+	urlCred  *regexp.Regexp
+	header   *regexp.Regexp
+	query    *regexp.Regexp
+	apiToken *regexp.Regexp
 }
 
 // credentialPatterns covers the common ways commands echo credentials:
-// URLs with userinfo, authorization headers, and token-style query or body
-// parameters.
+// URLs with userinfo, authorization headers, token-style query or body
+// parameters, and bare Yukariko API-key tokens (#64) wherever they appear.
+// The api-token pattern has no trailing \b on purpose: base64url tokens
+// can end in '-', which is not a word character, and a backtracking match
+// would leave the last few characters visible.
 var (
-	urlCredPattern = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*)://([^:/@\s]+):([^@\s/]+)@`)
-	headerPattern  = regexp.MustCompile(`(?i)((?:proxy-)?authorization|x-api-key|x-auth-token)\s*:[^\r\n]*`)
-	queryPattern   = regexp.MustCompile(`(?i)((?:api_?key|access_?token|auth_?token|token|secret|password|passwd|pwd)[_=])([^&\s"']+)`)
+	urlCredPattern  = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*)://([^:/@\s]+):([^@\s/]+)@`)
+	headerPattern   = regexp.MustCompile(`(?i)((?:proxy-)?authorization|x-api-key|x-auth-token)\s*:[^\r\n]*`)
+	queryPattern    = regexp.MustCompile(`(?i)((?:api_?key|access_?token|auth_?token|token|secret|password|passwd|pwd)[_=])([^&\s"']+)`)
+	apiTokenPattern = regexp.MustCompile(`\bykr_[a-zA-Z0-9_-]{20,}`)
 )
 
 // NewRedactor builds a redactor for the given literal secret values. Values
@@ -40,10 +45,11 @@ func NewRedactor(secrets []string) *Redactor {
 		}
 	}
 	return &Redactor{
-		secrets: kept,
-		urlCred: urlCredPattern,
-		header:  headerPattern,
-		query:   queryPattern,
+		secrets:  kept,
+		urlCred:  urlCredPattern,
+		header:   headerPattern,
+		query:    queryPattern,
+		apiToken: apiTokenPattern,
 	}
 }
 
@@ -58,6 +64,7 @@ func (r *Redactor) String(s string) string {
 	s = r.urlCred.ReplaceAllString(s, "$1://$2:"+replacement+"@")
 	s = r.header.ReplaceAllString(s, "$1: "+replacement)
 	s = r.query.ReplaceAllString(s, "$1"+replacement)
+	s = r.apiToken.ReplaceAllString(s, replacement)
 	return s
 }
 

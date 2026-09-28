@@ -17,6 +17,7 @@ state-only.**
 | Peer reports | Forged, replayed, or oversized reports; report-driven execution | HMAC-SHA256 over the exact body + timestamp + IDs, constant-time compare, per-host allowlisted keys with rotation, durable event-ID dedup, clock window, body-size cap, per-host rate limits, closed set of state-only report types — reports cannot name commands |
 | HTTP API + dashboard | Accidental exposure, mutation via web | GET/HEAD-only routes (matrix-tested), no forms or scripts, security headers, loopback bind by default, exposure documented as an operator decision |
 | Published dashboard/API (optional OIDC, #61) | Session theft, token forgery, login CSRF/replay, open redirect, provider spoofing | Authorization code + PKCE (S256); ID tokens verified in-binary (JWKS signature with kid rotation, issuer, audience, expiry via go-oidc with an RS256/ES256 allowlist; nonce compared by Yukariko against the single-use pending row — go-oidc deliberately does not check nonce) — never a hand-rolled verifier and never reverse-proxy headers; `state`/`nonce`/verifier are single-use server-side rows with a 10-minute TTL, and sessions are server-side rows keyed by a SHA-256-hashed 256-bit cookie token (HttpOnly, SameSite=Lax, Secure + `__Host-` prefix on https origins) — a database copy resurrects nothing; the post-login redirect is local-only (absolute, protocol-relative, `/auth`-prefixed, and backslash-carrying targets are all refused); optional `allowed_groups` enforces a default-deny membership check in Yukariko itself; issuer and external origin must be https (loopback http for tests); the client secret resolves only at token exchange |
+| API keys (#64) | Bearer token theft, key sprawl, silent revocation gaps | Keys are 256-bit random `ykr_`-prefixed tokens shown once at creation and stored as SHA-256 hashes only — a database copy resurrects nothing; validation hits the store on every request, so revocation/expiry is immediate and uncached; presented-but-invalid credentials fail closed (no session fallback); keys unlock only the read-only API, never `/ui` or the report channel; the `ykr_` token shape is a runner redaction pattern; enabling requires `server.enabled` |
 | Supply chain | Third-party assets/dependencies | Stdlib-first (five direct deps: cobra, yaml.v3, modernc sqlite, go-oidc, x/oauth2 — the last two are the vetted OIDC relying-party pair, chosen deliberately over hand-rolling auth verification); original assets only, inventoried in docs/ASSETS.md |
 
 ## Security checklist (release review)
@@ -38,6 +39,11 @@ state-only.**
       safe claims subset — verified by table tests against a fake provider
       covering replay, nonce/audience/issuer/expiry violations, unknown
       signing keys, PKCE, group policy, cookie flags, and rate limits.
+- [x] API keys (#64) fail closed the same way: enabling requires a
+      listener, every `/api` request needs a valid key or session, only the
+      SHA-256 of each token is stored, revocation is immediate, and a
+      presented-but-invalid credential never falls back to a session —
+      verified by the middleware matrix and store tests.
 - [x] Deploy checkpoints advance only inside a store transaction after
       required health checks; cancellation cannot record success.
 - [x] Docker daemon access is documented as root-equivalent
@@ -65,3 +71,13 @@ state-only.**
   callback URL can log the victim in as the attacker. On a read-only
   surface whose footer always shows the true signed-in subject, the impact
   is low; the standard cookie mitigation remains a documented follow-up.
+- API keys (#64) are bearer credentials with full read scope: anyone
+  holding the token can read everything the API exposes until it is
+  revoked. There is no per-key scoping (the surface is read-only, so there
+  is nothing narrower to grant) and no per-key rate limiting; leaked keys
+  are mitigated by rotation, optional expiry, and the `ykr_` redaction
+  pattern, not by detectability.
+- API-key enforcement and the login rate limit both see the transport
+  peer; key requests are not rate-limited at all beyond what a listener's
+  network position provides. The API is read-only and bounded, so this is
+  an exposure consideration, not a mutation risk.

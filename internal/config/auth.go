@@ -9,6 +9,17 @@ import "strings"
 // HTTP surface behaves exactly as before (loopback-bind recommended).
 type Auth struct {
 	OIDC OIDCAuth `yaml:"oidc,omitempty"`
+	// APIKeys gates the read-only API behind CLI-managed bearer keys
+	// (issue #64). Keys live in the store, never in YAML; enabling the
+	// feature makes every /api request require a valid key or (when OIDC
+	// is also on) a session.
+	APIKeys APIKeysAuth `yaml:"api_keys,omitempty"`
+}
+
+// APIKeysAuth is the opt-in switch for machine credential access. The keys
+// themselves are generated, listed, and revoked through `yukariko apikey`.
+type APIKeysAuth struct {
+	Enabled bool `yaml:"enabled,omitempty"`
 }
 
 // OIDCAuth is the OpenID Connect relying-party configuration. Any compliant

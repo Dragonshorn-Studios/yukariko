@@ -375,8 +375,12 @@ func validateReporting(v *validator, r *Reporting) {
 // (issue #61): an enabled gate must have a listener to protect, an issuer,
 // a client identity, a secret reference, and the external origin browsers
 // actually reach. Issuer and origin must be https (loopback http is a test
-// affordance), mirroring the reporting credential-leak doctrine.
+// affordance), mirroring the reporting credential-leak doctrine. The API
+// key switch (#64) follows the same require-a-listener rule.
 func validateAuth(v *validator, c *Config) {
+	if c.Auth.APIKeys.Enabled && !c.Server.Enabled {
+		v.errorf("auth.api_keys.enabled", "requires server.enabled so there is a listener to protect; refusing a half-configured gate")
+	}
 	o := &c.Auth.OIDC
 	if !o.Enabled {
 		return

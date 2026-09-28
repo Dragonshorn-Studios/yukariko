@@ -282,6 +282,14 @@ func TestRedactorPatterns(t *testing.T) {
 		{"normal text", "normal text"},
 		{"hunter2", "[REDACTED]"},
 		{"pw", "pw"}, // short values are never treated as secrets
+		// Yukariko API-key tokens are redacted wherever they appear (#64),
+		// including a trailing '-' (base64url alphabet, not a word char).
+		{"Bearer ykr_Abcdefghijklmnopqrstuvwxyz12", "Bearer [REDACTED]"},
+		{"token=ykr_Abcdefghijklmnopqrstuvwxyz1-", "token=[REDACTED]"},
+		// A header value is redacted to end of line, so the token inside
+		// never survives either way.
+		{"Authorization: ykr_Abcdefghijklmnopqrstuvwxyz12", "Authorization: [REDACTED]"},
+		{"ykr_short", "ykr_short"}, // too short to be a real token: untouched
 	}
 	for _, c := range cases {
 		if got := r.String(c.in); got != c.want {

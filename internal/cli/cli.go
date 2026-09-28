@@ -85,6 +85,7 @@ and runs controlled local commands; it does not replace Compose, Coolify, or Por
 	root.AddCommand(a.newLogsCommand())
 	root.AddCommand(a.newLearnCommand())
 	root.AddCommand(a.newExposeCommand())
+	root.AddCommand(a.newAPIKeyCommand())
 
 	return root
 }
@@ -149,6 +150,8 @@ func isUsageError(err error) bool {
 	case strings.Contains(s, "unknown shorthand flag"):
 		return true
 	case strings.Contains(s, "flag needs an argument"):
+		return true
+	case strings.Contains(s, "required flag"):
 		return true
 	case strings.Contains(s, "accepts"):
 		return true

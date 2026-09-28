@@ -267,15 +267,18 @@ func reportHandlerFor(cfg *config.Config, st *store.Store) http.Handler {
 	}, st).Handler()
 }
 
-// authenticatorFor builds the optional OIDC gate when the configuration
-// enables it (issue #61). The client secret stays a SecretRef and resolves
-// only inside the token exchange; the provider is discovered lazily at
-// first login so an unreachable IdP never blocks daemon startup.
+// authenticatorFor builds the optional HTTP gate when the configuration
+// enables either the OIDC gate (#61) or API keys (#64). The client secret
+// stays a SecretRef and resolves only inside the token exchange; the
+// provider is discovered lazily at first login so an unreachable IdP never
+// blocks daemon startup. With keys enabled and OIDC disabled the gate runs
+// in a keys-only mode: /api requires a key, /ui stays open, and no /auth
+// routes exist.
 func authenticatorFor(cfg *config.Config, st *store.Store) *auth.Server {
-	if !cfg.Auth.OIDC.Enabled {
+	if !cfg.Auth.OIDC.Enabled && !cfg.Auth.APIKeys.Enabled {
 		return nil
 	}
-	return &auth.Server{OIDC: cfg.Auth.OIDC, Store: st, Log: slog.Default()}
+	return &auth.Server{OIDC: cfg.Auth.OIDC, APIKeys: cfg.Auth.APIKeys.Enabled, Store: st, Log: slog.Default()}
 }
 
 // --- source checking --------------------------------------------------------

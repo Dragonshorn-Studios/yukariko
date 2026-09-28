@@ -1098,6 +1098,71 @@ apps: []
 	}
 }
 
+func TestAuthAPIKeys(t *testing.T) {
+	t.Parallel()
+	t.Run("valid with server enabled", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := Parse([]byte(`
+schema_version: 1
+server: {enabled: true}
+auth:
+  api_keys:
+    enabled: true
+apps: []
+`))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if !cfg.Auth.APIKeys.Enabled {
+			t.Error("api_keys.enabled did not parse")
+		}
+		if cfg.Auth.OIDC.Enabled {
+			t.Error("api_keys must not enable oidc")
+		}
+	})
+	t.Run("enabled without server refused", func(t *testing.T) {
+		t.Parallel()
+		_, err := Parse([]byte(`
+schema_version: 1
+auth:
+  api_keys:
+    enabled: true
+apps: []
+`))
+		if err == nil {
+			t.Fatal("Parse succeeded, want error")
+		}
+		if !strings.Contains(err.Error(), "auth.api_keys.enabled: requires server.enabled") {
+			t.Errorf("error %q does not mention the require-a-listener rule", err.Error())
+		}
+	})
+	t.Run("unknown api_keys field rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := Parse([]byte(`
+schema_version: 1
+server: {enabled: true}
+auth:
+  api_keys:
+    enabled: true
+    literal: oops
+apps: []
+`))
+		if err == nil || !strings.Contains(err.Error(), "field literal not found") {
+			t.Errorf("error = %v; want unknown-field rejection", err)
+		}
+	})
+	t.Run("disabled section is inert", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := Parse([]byte("schema_version: 1\napps: []\n"))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if cfg.Auth.APIKeys.Enabled {
+			t.Error("api_keys must default to disabled")
+		}
+	})
+}
+
 func TestAuthOIDCDisabledSectionIsInert(t *testing.T) {
 	t.Parallel()
 	// A disabled or absent section never demands anything...
