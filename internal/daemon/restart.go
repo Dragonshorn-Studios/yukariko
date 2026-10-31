@@ -7,6 +7,7 @@ import (
 
 	"github.com/Dragonshorn-Studios/yukariko/internal/config"
 	"github.com/Dragonshorn-Studios/yukariko/internal/deploy"
+	"github.com/Dragonshorn-Studios/yukariko/internal/state"
 	"github.com/Dragonshorn-Studios/yukariko/internal/store"
 )
 
@@ -33,10 +34,7 @@ func (a *Assembled) Restart(ctx context.Context, appID string) error {
 	defer release()
 
 	// The version kind follows the app's source mode, mirroring Deploy.
-	kind := store.KindDigest
-	if app.Source.Mode == config.SourceGit {
-		kind = store.KindGitSHA
-	}
+	kind := state.VersionKind(app)
 	depID, err := a.Deployer.claimDeploymentCause(ctx, app, "restart", kind)
 	if err != nil {
 		a.recordRestart(ctx, appID, store.LevelWarn, "restart refused: "+err.Error())
