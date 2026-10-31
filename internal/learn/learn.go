@@ -102,6 +102,20 @@ type GitEvidence struct {
 	Detached      bool   `json:"detached,omitempty"`
 }
 
+// BinaryProposal is one go-binary manifest (app.json) discovered under the
+// invoking user's home. The directory that held the manifest is the app home.
+type BinaryProposal struct {
+	Dir           string   `json:"dir"`
+	Bin           string   `json:"bin"`
+	Unit          string   `json:"unit"`
+	DisplayName   string   `json:"display_name,omitempty"`
+	HealthURL     string   `json:"health_url,omitempty"`
+	Repo          string   `json:"repo"`
+	Asset         string   `json:"asset"`
+	ArchiveBinary string   `json:"archive_binary"`
+	Args          []string `json:"args,omitempty"` // evidence only; the unit file owns the process
+}
+
 // Proposal is one reviewable candidate app.
 type Proposal struct {
 	ID              string   `json:"id"`                         // stable candidate app ID (config slug, unique here)
@@ -119,6 +133,7 @@ type Proposal struct {
 
 	Compose    *ComposeProposal    `json:"compose,omitempty"`    // non-nil iff Mode is compose
 	Standalone *StandaloneProposal `json:"standalone,omitempty"` // non-nil iff Mode is standalone
+	Binary     *BinaryProposal     `json:"binary,omitempty"`     // non-nil iff Mode is binary
 
 	// Docker is the endpoint the candidate was discovered on (nil = the
 	// invoking user's default daemon). Non-default candidates carry the
