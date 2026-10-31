@@ -5,9 +5,11 @@ package config
 const (
 	SourceGit      = "git"
 	SourceRegistry = "registry"
+	SourceRelease  = "release"
 
 	DeployCompose    = "compose"
 	DeployStandalone = "standalone"
+	DeployBinary     = "binary"
 )
 
 // App is one deployed application. ID is the stable identity used by the
@@ -37,6 +39,7 @@ type Source struct {
 	Mode     string          `yaml:"mode"`
 	Git      *GitSource      `yaml:"git,omitempty"`
 	Registry *RegistrySource `yaml:"registry,omitempty"`
+	Release  *ReleaseSource  `yaml:"release,omitempty"`
 }
 
 // GitSource points at an existing local worktree deployed through Git.
@@ -59,11 +62,32 @@ type ImageRef struct {
 	Platform string `yaml:"platform,omitempty"`
 }
 
+// ReleaseSource tracks one GitHub release. Asset is a filename template
+// using {tag}, {os}, and {arch}. ArchiveBinary is the single member taken
+// from the checksum-verified archive. TokenRef is optional; it is the only
+// way to name a credential, and the value itself is never stored here.
+type ReleaseSource struct {
+	Repo          string     `yaml:"repo"`
+	Asset         string     `yaml:"asset"`
+	ArchiveBinary string     `yaml:"archive_binary"`
+	TokenRef      *SecretRef `yaml:"token_ref,omitempty"`
+}
+
 // Deploy declares how the app is deployed.
 type Deploy struct {
 	Mode       string          `yaml:"mode"`
 	Compose    *ComposeDeploy  `yaml:"compose,omitempty"`
 	Standalone *StandaloneSpec `yaml:"standalone,omitempty"`
+	Binary     *BinaryDeploy   `yaml:"binary,omitempty"`
+}
+
+// BinaryDeploy replaces one file inside Dir and restarts a systemd user
+// unit. Bin is relative to Dir. The unit file owns the process; Yukariko
+// does not supervise it and does not execute the archive it downloaded.
+type BinaryDeploy struct {
+	Dir  string `yaml:"dir"`
+	Bin  string `yaml:"bin"`
+	Unit string `yaml:"unit"`
 }
 
 // ComposeDeploy captures the exact Compose invocation context. Every command
