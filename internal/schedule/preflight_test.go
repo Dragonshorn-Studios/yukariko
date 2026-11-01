@@ -173,6 +173,28 @@ func TestPreflightMatrix(t *testing.T) {
 			wantStr: []string{"value:health.url"},
 		},
 		{
+			name: "valid go binary does not require docker",
+			mutate: func(app *config.App, dir string) {
+				home := filepath.Join(dir, "marller")
+				_ = os.MkdirAll(filepath.Join(home, "bin"), 0o755)
+				_ = os.WriteFile(filepath.Join(home, "bin", "marller"), []byte("bin"), 0o755)
+				*app = config.App{
+					ID: "marller",
+					Source: config.Source{
+						Mode: config.SourceRelease,
+						Release: &config.ReleaseSource{
+							Repo: "Dragonshorn-Studios/marller", Asset: "marller-{tag}-{os}-{arch}.tar.gz", ArchiveBinary: "marller",
+						},
+					},
+					Deploy: config.Deploy{
+						Mode:   config.DeployBinary,
+						Binary: &config.BinaryDeploy{Dir: home, Bin: "bin/marller", Unit: "marller"},
+					},
+				}
+			},
+			wantOK: true,
+		},
+		{
 			name: "data dir unwritable",
 			mutate: func(app *config.App, dir string) {
 				*app = *standaloneApp()
