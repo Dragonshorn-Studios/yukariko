@@ -142,6 +142,20 @@ rootless-only host you may also want a drop-in removing the unit's
   `docker-credential-*`. Keys for outbound reporting are file/env
   references (`secret_ref`), resolved at use and never persisted.
 
+## Go binaries (GitHub releases)
+
+An installer that writes `~/.marller/app.json` with `"kind": "go-binary"` is
+picked up by `yukariko learn` alongside Docker. The imported app uses
+`source.mode: release` and `deploy.mode: binary`: Yukariko polls the GitHub
+release, downloads the asset named by the template, verifies `SHA256SUMS`,
+replaces the binary inside the app home, and runs
+`systemctl --user restart <unit>`. It does not run the app's install script
+and it does not supervise the process — the user unit does.
+
+Run Yukariko as the user who owns that unit. A private release needs
+`source.release.token_ref` (env or file); the token is resolved at download
+and never stored. Docker is not required for these apps.
+
 ## Compose profiles, env files, and project names
 
 `deploy.compose` reproduces the exact invocation: `work_dir` becomes the
