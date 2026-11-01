@@ -1,6 +1,6 @@
 # Yukariko
 
-Local Go single-binary CLI/agent for Docker Compose and standalone Docker deploys driven by Git or image digests. Host Docker, Compose, and Git remain the source of truth. Yukariko observes, records, and runs controlled local commands; it does not become the platform.
+Local Go single-binary CLI/agent for Docker Compose, standalone Docker, and release-installed Go binaries. Host Docker, Compose, Git, and the app's systemd user unit remain the source of truth. Yukariko observes, records, and runs controlled local commands; it does not become the platform.
 
 Human docs: `README.md`. This file is the canonical agent contract for Cursor, Codex, OpenCode, and ZCode. Keep it updated when an issue makes a real architecture decision. Do not duplicate it into `CLAUDE.md`, `.cursorrules`, or tool-specific instruction files.
 
@@ -42,10 +42,11 @@ MVP complete (#1–#19, scope frozen); #42 is the first post-MVP extension.
 - `internal/learn` — proposals + interactive import flow (diff, merge, backup, atomic write)
 - `internal/schedule` — per-app loops, state machine, locks, backoff, preflight
 - `internal/registry` — OCI/Distribution digest resolution (auth, platform, typed errors)
+- `internal/release` — GitHub release tag lookup, SHA256SUMS verification, single-member extract; tokens are SecretRefs resolved at call time and never logged
 - `internal/auth` — optional HTTP gate: OIDC (#61) session middleware, /auth handlers, SQLite sessions, and bearer API keys (#64)
 - `internal/health` — HTTP/docker/command probes, post-deploy checks, independent monitor
 - `internal/webhooks` — outbound delivery queue for signed deployment notifications (#65)
-- `internal/deploy` — compose pipeline (#11); standalone recreation (#12); operator restart (#56); Docker CLI engine
+- `internal/deploy` — compose pipeline (#11); standalone recreation (#12); operator restart (#56); binary release replace + `systemctl --user restart`; Docker CLI engine
 - `internal/version` — build-time Version/Commit/Date
 - `internal/exitcode` — stable process codes
 
