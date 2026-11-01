@@ -1,6 +1,6 @@
 # Yukariko
 
-Yukariko is a local single-binary agent for Docker Compose and standalone Docker deploys driven by Git or image digests.
+Yukariko is a local single-binary agent for Docker Compose, standalone Docker, and release-installed Go binaries driven by Git, image digests, or GitHub release tags.
 
 Host Docker, Compose, and Git remain the source of truth. Yukariko observes, records, and runs controlled local commands; it does not replace Compose and is not Coolify, Portainer, or a remote orchestration platform.
 
@@ -69,7 +69,7 @@ Every command is operational. Each themed alias is the same command with identic
 | `expose` | — | Grant the strict systemd unit write access to a git worktree (run from its directory) or a rootless Docker socket, via the `ReadWritePaths` drop-in (`sudo`, idempotent) |
 | `learn` | — | One-time onboarding: scan local Docker read-only, select candidates, resolve required fields, preview a YAML diff, import after explicit confirmation |
 
-`yukariko learn --config yukariko.yaml` scans running and stopped containers (never mutating Docker), proposes one app per Compose project and per standalone container, and writes only after you confirm the diff — with a timestamped backup, atomic replacement, and full re-validation. Existing manual settings (intervals, retries, steps, health, enabled) survive merges. Flags: `--dry-run` previews without writing, `--json` prints machine-readable proposals without prompts, `--include-system` offers system/infrastructure candidates (excluded by default). learn never deploys anything; monitoring starts when the daemon runs.
+`yukariko learn --config yukariko.yaml` scans running and stopped containers (never mutating Docker) and `app.json` manifests (`kind: go-binary`) one directory below your home — the layout `~/.marller` uses — proposes one app per Compose project, per standalone container, and per manifest, and writes only after you confirm the diff — with a timestamped backup, atomic replacement, and full re-validation. Existing manual settings (intervals, retries, steps, health, enabled) survive merges. Flags: `--dry-run` previews without writing, `--json` prints machine-readable proposals without prompts, `--include-system` offers system/infrastructure candidates (excluded by default). learn never deploys anything; monitoring starts when the daemon runs.
 
 Global flags: `--config`, `--data-dir` (default `./data`), `--version`. Exit codes for scripts: 0 ok, 1 error, 2 usage, 130 interrupted.
 
