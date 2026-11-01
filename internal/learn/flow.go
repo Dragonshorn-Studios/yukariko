@@ -48,6 +48,10 @@ type FlowOptions struct {
 	// Now stamps the backup file name; zero means time.Now. Injectable for
 	// deterministic tests.
 	Now time.Time
+	// Home, when set, is scanned one directory deep for app.json manifests
+	// (kind go-binary). Empty skips the scan. The CLI passes the invoking
+	// user's home; tests leave it empty unless they opt in.
+	Home string
 }
 
 // EndpointScan is one additional local daemon to scan during learn.
@@ -272,6 +276,11 @@ func describe(p *Proposal) string {
 		return fmt.Sprintf("%d service(s) in %s", len(c.Services), or(c.WorkDir, "unknown directory"))
 	case "standalone":
 		return fmt.Sprintf("image %s", or(p.Standalone.Image, "unknown"))
+	case config.DeployBinary:
+		if p.Binary == nil {
+			return "go binary"
+		}
+		return fmt.Sprintf("go binary in %s, unit %s, release %s", p.Binary.Dir, p.Binary.Unit, p.Binary.Repo)
 	default:
 		return ""
 	}
@@ -364,6 +373,18 @@ func (f *flow) scan(ctx context.Context) ([]*Proposal, error) {
 			}
 			if seen[p.ID] {
 				p.ID = disambiguatedID(p.ID, scan.Endpoint.Name)
+				if seen[p.ID] {
+					continue
+				}
+			}
+			seen[p.ID] = true
+			out = append(out, p)
+		}
+	}
+	if f.opts.Home != "" {
+		for _, p := range BinaryProposals(f.opts.Home) {
+			if seen[p.ID] {
+				p.ID = disambiguatedID(p.ID, "home")
 				if seen[p.ID] {
 					continue
 				}
