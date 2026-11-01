@@ -177,6 +177,28 @@ func TestParseValidExamples(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "release + binary",
+			file: "release-binary.yaml",
+			check: func(t *testing.T, cfg *Config) {
+				app, ok := cfg.App("marller")
+				if !ok {
+					t.Fatal("app marller missing")
+				}
+				if app.Source.Mode != SourceRelease || app.Source.Release == nil || app.Source.Release.Repo != "Dragonshorn-Studios/marller" {
+					t.Fatalf("release source = %+v", app.Source)
+				}
+				if app.Source.Release.TokenRef == nil || app.Source.Release.TokenRef.Env != "GITHUB_TOKEN" {
+					t.Fatalf("token ref = %+v", app.Source.Release.TokenRef)
+				}
+				if app.Deploy.Mode != DeployBinary || app.Deploy.Binary == nil || app.Deploy.Binary.Unit != "marller" {
+					t.Fatalf("binary deploy = %+v", app.Deploy)
+				}
+				if app.Health == nil || app.Health.HTTP == nil || app.Health.HTTP.URL != "http://127.0.0.1:8080/health/live" {
+					t.Fatalf("health = %+v", app.Health)
+				}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -424,7 +446,57 @@ apps:
     source: {mode: svn}
     deploy: {mode: compose, compose: {work_dir: /srv/demo, files: [compose.yaml]}}
 `,
-			want: []string{`apps[0].source.mode: must be "git" or "registry", got "svn"`},
+			want: []string{`apps[0].source.mode: must be "git", "registry", or "release", got "svn"`},
+		},
+		{
+			name: "release asset must stay a filename template",
+			doc: `
+schema_version: 1
+apps:
+  - id: marller
+    source:
+      mode: release
+      release:
+        repo: Dragonshorn-Studios/marller
+        asset: ../marller-{tag}.tar.gz
+        archive_binary: marller
+    deploy:
+      mode: binary
+      binary: {dir: /home/op/.marller, bin: bin/marller, unit: marller}
+`,
+			want: []string{"apps[0].source.release.asset: must be a filename template without a path"},
+		},
+		{
+			name: "binary bin must stay inside the app home",
+			doc: `
+schema_version: 1
+apps:
+  - id: marller
+    source:
+      mode: release
+      release:
+        repo: Dragonshorn-Studios/marller
+        asset: marller-{tag}-{os}-{arch}.tar.gz
+        archive_binary: marller
+    deploy:
+      mode: binary
+      binary: {dir: /home/op/.marller, bin: ../marller, unit: marller}
+`,
+			want: []string{"apps[0].deploy.binary.bin: must be a relative path inside the app home"},
+		},
+		{
+			name: "two binary apps cannot share a home",
+			doc: `
+schema_version: 1
+apps:
+  - id: one
+    source: {mode: release, release: {repo: a/one, asset: "one-{tag}.tar.gz", archive_binary: one}}
+    deploy: {mode: binary, binary: {dir: /srv/one, bin: bin/one, unit: one}}
+  - id: two
+    source: {mode: release, release: {repo: a/two, asset: "two-{tag}.tar.gz", archive_binary: two}}
+    deploy: {mode: binary, binary: {dir: /srv/one, bin: bin/two, unit: two}}
+`,
+			want: []string{"apps[1]: deploys the same target as apps[0]"},
 		},
 		{
 			name: "outbound http to non-loopback rejected",
