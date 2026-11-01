@@ -27,6 +27,7 @@ import (
 	"github.com/Dragonshorn-Studios/yukariko/internal/health"
 	"github.com/Dragonshorn-Studios/yukariko/internal/httpapi"
 	"github.com/Dragonshorn-Studios/yukariko/internal/registry"
+	"github.com/Dragonshorn-Studios/yukariko/internal/release"
 	"github.com/Dragonshorn-Studios/yukariko/internal/report"
 	"github.com/Dragonshorn-Studios/yukariko/internal/runner"
 	"github.com/Dragonshorn-Studios/yukariko/internal/schedule"
@@ -54,6 +55,15 @@ type Options struct {
 	PipelineRun func(ctx context.Context, req runner.Request) (runner.Result, error)
 	// Engine overrides the standalone mutation engine (tests).
 	Engine deploy.Engine
+	// Release overrides the GitHub release client (tests).
+	Release ReleaseClient
+}
+
+// ReleaseClient is the GitHub release surface the checker and the binary
+// pipeline share. The real implementation is internal/release.Client.
+type ReleaseClient interface {
+	Latest(ctx context.Context, src *config.ReleaseSource) (string, error)
+	Install(ctx context.Context, src *config.ReleaseSource, dir, bin string) (string, error)
 }
 
 // Assembled is the wired application.
@@ -157,7 +167,11 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 	}
 
 	reporter := reporterFor(opts.Config, st, runnerSvc)
-	checker := &SourceChecker{store: st, git: gitClient, registry: registryClient}
+	releases := opts.Release
+	if releases == nil {
+		releases = &release.Client{}
+	}
+	checker := &SourceChecker{store: st, git: gitClient, registry: registryClient, releases: releases}
 	dispatcher := &DeployDispatcher{
 		store:       st,
 		runner:      runnerSvc,
@@ -165,6 +179,7 @@ func Assemble(ctx context.Context, opts Options) (*Assembled, error) {
 		Engine:      opts.Engine,
 		git:         gitClient,
 		Registry:    registryClient,
+		releases:    releases,
 		Health:      healthSvc,
 		Platform:    opts.Platform,
 		Default:     cfg.Docker,
@@ -318,6 +333,7 @@ type SourceChecker struct {
 	store    *store.Store
 	git      *git.Client
 	registry *registry.Resolver
+	releases ReleaseClient
 }
 
 // Check implements the observation half of the scheduler's Checker seam.
@@ -378,6 +394,31 @@ func (c *SourceChecker) Check(ctx context.Context, app *config.App) (schedule.Ch
 		}
 		return schedule.CheckResult{Changed: res.Changed, Detail: detail}, nil
 
+	case config.SourceRelease:
+		if app.Source.Release == nil {
+			return schedule.CheckResult{}, errors.New("release source is not configured")
+		}
+		if c.releases == nil {
+			return schedule.CheckResult{}, errors.New("release client is not configured")
+		}
+		tag, err := c.releases.Latest(ctx, app.Source.Release)
+		if err != nil {
+			return schedule.CheckResult{}, err
+		}
+		if err := c.store.RecordObservation(ctx, app.ID, store.KindRelease, tag, time.Now()); err != nil {
+			return schedule.CheckResult{}, err
+		}
+		deployed, _, ok, err := c.store.DeployedVersion(ctx, app.ID, store.KindRelease)
+		if err != nil {
+			return schedule.CheckResult{}, err
+		}
+		changed := !ok || deployed != tag
+		detail := "release unchanged"
+		if changed {
+			detail = "release " + tag + " is not the checkpointed version"
+		}
+		return schedule.CheckResult{Changed: changed, Observed: tag, Detail: detail}, nil
+
 	default:
 		return schedule.CheckResult{}, fmt.Errorf("unsupported source mode %q", app.Source.Mode)
 	}
@@ -398,6 +439,7 @@ type DeployDispatcher struct {
 	Engine      deploy.Engine // DI override; nil uses the CLI engine
 	git         *git.Client
 	Registry    *registry.Resolver
+	releases    ReleaseClient
 	Health      *health.Service
 	Platform    string
 	Default     *config.DockerEndpoint // configuration-wide Docker endpoint
@@ -415,10 +457,7 @@ func (d *DeployDispatcher) endpointFlags(app *config.App) []string {
 
 // Deploy implements the scheduler's Deployer seam.
 func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedule.DeployResult, error) {
-	kind := store.KindDigest
-	if app.Source.Mode == config.SourceGit {
-		kind = store.KindGitSHA
-	}
+	kind := state.VersionKind(app)
 	depID, err := d.claimDeploymentCause(ctx, app, "update", kind)
 	if err != nil {
 		return schedule.DeployResult{}, err
@@ -451,6 +490,14 @@ func (d *DeployDispatcher) Deploy(ctx context.Context, app *config.App) (schedul
 			Runner:          d.runner,
 			Run:             d.pipelineRun,
 			DefaultEndpoint: d.Default,
+		}
+	case config.DeployBinary:
+		dep = &deploy.BinaryPipeline{
+			Releases:   d.releases,
+			Health:     d.Health,
+			Checkpoint: checkpoint,
+			Runner:     d.runner,
+			Run:        d.pipelineRun,
 		}
 	default:
 		err := fmt.Errorf("unsupported deploy mode %q", app.Deploy.Mode)
