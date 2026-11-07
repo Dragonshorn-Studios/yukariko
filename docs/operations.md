@@ -114,9 +114,46 @@ point the daemon at it via the `docker.host` endpoint in the config. On a
 rootless-only host you may also want a drop-in removing the unit's
 `Requires=docker.service` (it assumes the system daemon).
 
-## Upgrades
+## Updating Yukariko
 
-- Replace the binary (same path), then `systemctl restart yukariko`.
+Yukariko is a single binary: an update is a binary swap plus a daemon
+restart. State — the config, the SQLite store, systemd drop-ins, group
+memberships — is never reset by an update.
+
+**Recommended: re-run the installer.** It is idempotent, so the same
+one-liner that installed Yukariko updates it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Dragonshorn-Studios/yukariko/main/scripts/install.sh | sudo sh
+sudo systemctl restart yukariko
+```
+
+A rerun resolves the latest release (`--version vX.Y.Z` pins a specific
+one), verifies `SHA256SUMS`, replaces `/usr/local/bin/yukariko`, refreshes
+the unit file, and reloads systemd. The existing config is never
+overwritten, and the `expose`/`--read-write` drop-in entries are merged,
+never truncated — grants made at install time survive, so no flags need
+repeating. The unit file itself is replaced, so keep local customizations
+in `yukariko.service.d/*.conf` drop-ins rather than editing the unit. The
+installer reloads systemd but never restarts the service: without the
+`systemctl restart` the daemon keeps running the old binary.
+
+**Manual.** Download `yukariko-<version>-linux-<arch>.tar.gz` and
+`SHA256SUMS` from the Releases page, verify with
+`sha256sum -c --ignore-missing`, unpack, install the binary at the same
+path, then `systemctl restart yukariko`.
+
+**From source.** `go install
+github.com/Dragonshorn-Studios/yukariko/cmd/yukariko@latest` (or
+`scripts/build-release.sh`), replace the binary, restart the daemon.
+
+Verify afterwards:
+
+```sh
+yukariko --version           # the new build reports its version
+systemctl status yukariko    # unit active on the new binary
+```
+
 - The configuration schema is versioned; a build refuses a newer schema
   with a migration hint. Migrations are documented in `docs/config.md`
   before any bump.
