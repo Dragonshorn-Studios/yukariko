@@ -98,6 +98,38 @@ func buildApp(ctx context.Context, p *Proposal, res resolution) (config.App, err
 		}
 		return app, nil
 
+	case config.DeployBinary:
+		b := p.Binary
+		if b == nil {
+			return config.App{}, fmt.Errorf("no binary manifest")
+		}
+		if b.Dir == "" || b.Bin == "" || b.Unit == "" || b.Repo == "" || b.Asset == "" || b.ArchiveBinary == "" {
+			return config.App{}, fmt.Errorf("binary manifest is incomplete")
+		}
+		app.Source = config.Source{
+			Mode: config.SourceRelease,
+			Release: &config.ReleaseSource{
+				Repo:          b.Repo,
+				Asset:         b.Asset,
+				ArchiveBinary: b.ArchiveBinary,
+			},
+		}
+		app.Deploy = config.Deploy{
+			Mode: config.DeployBinary,
+			Binary: &config.BinaryDeploy{
+				Dir:  b.Dir,
+				Bin:  b.Bin,
+				Unit: b.Unit,
+			},
+		}
+		if b.HealthURL != "" {
+			app.Health = &config.Health{HTTP: &config.HTTPProbe{URL: b.HealthURL}}
+		}
+		if b.DisplayName != "" {
+			app.DisplayName = b.DisplayName
+		}
+		return app, nil
+
 	default:
 		return config.App{}, fmt.Errorf("unknown mode %q", p.Mode)
 	}
@@ -109,6 +141,11 @@ func displayName(p *Proposal) string {
 		return p.Compose.ProjectName
 	case "standalone":
 		return p.Standalone.ContainerName
+	case config.DeployBinary:
+		if p.Binary != nil && p.Binary.DisplayName != "" {
+			return p.Binary.DisplayName
+		}
+		return p.ID
 	default:
 		return p.ID
 	}

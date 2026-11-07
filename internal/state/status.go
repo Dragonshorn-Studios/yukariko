@@ -16,18 +16,25 @@ import (
 
 // VersionKind is the deployed-version kind for an app's source mode.
 func VersionKind(app *config.App) string {
-	if app.Source.Mode == config.SourceGit {
+	switch app.Source.Mode {
+	case config.SourceGit:
 		return store.KindGitSHA
+	case config.SourceRelease:
+		return store.KindRelease
+	default:
+		return store.KindDigest
 	}
-	return store.KindDigest
 }
 
 // ObservedKind is the observation kind recorded for an app's primary
 // version. Registry apps record per-image observations under
 // "digest:<canonical ref>"; this returns the primary (first) image's kind.
 func ObservedKind(app *config.App) string {
-	if app.Source.Mode == config.SourceGit {
+	switch app.Source.Mode {
+	case config.SourceGit:
 		return store.KindGitSHA
+	case config.SourceRelease:
+		return store.KindRelease
 	}
 	if app.Source.Registry != nil && len(app.Source.Registry.Images) > 0 {
 		if ref, err := registry.ParseRef(app.Source.Registry.Images[0].Ref); err == nil {

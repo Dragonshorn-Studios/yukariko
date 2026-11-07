@@ -52,6 +52,18 @@ func TestRestartArgv(t *testing.T) {
 			wantTimeout: 2 * time.Minute,
 		},
 		{
+			name: "binary restarts the systemd user unit",
+			app: &config.App{
+				ID: "marller",
+				Deploy: config.Deploy{
+					Mode:   config.DeployBinary,
+					Binary: &config.BinaryDeploy{Dir: "/home/op/.marller", Bin: "bin/marller", Unit: "marller"},
+				},
+			},
+			want:        "systemctl --user restart marller",
+			wantTimeout: appTimeout(&config.App{}),
+		},
+		{
 			name:        "compose falls back to the configuration-wide endpoint",
 			app:         composeApp(),
 			fallback:    &config.DockerEndpoint{Context: "desktop-linux"},

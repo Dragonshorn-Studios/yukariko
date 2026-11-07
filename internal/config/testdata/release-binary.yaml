@@ -1,0 +1,21 @@
+schema_version: 1
+apps:
+  - id: marller
+    display_name: Marller
+    source:
+      mode: release
+      release:
+        repo: Dragonshorn-Studios/marller
+        asset: "marller-{tag}-{os}-{arch}.tar.gz"
+        archive_binary: marller
+        token_ref:
+          env: GITHUB_TOKEN
+    deploy:
+      mode: binary
+      binary:
+        dir: /home/op/.marller
+        bin: bin/marller
+        unit: marller
+    health:
+      http:
+        url: http://127.0.0.1:8080/health/live

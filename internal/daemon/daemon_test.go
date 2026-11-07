@@ -91,6 +91,40 @@ func TestSourceCheckerGitDispatch(t *testing.T) {
 	}
 }
 
+type stubRelease struct{ tag string }
+
+func (s stubRelease) Latest(context.Context, *config.ReleaseSource) (string, error) {
+	return s.tag, nil
+}
+func (s stubRelease) Install(context.Context, *config.ReleaseSource, string, string) (string, error) {
+	return s.tag, nil
+}
+
+func TestSourceCheckerReleaseOwedUntilCheckpoint(t *testing.T) {
+	t.Parallel()
+	st := openTempStore(t)
+	checker := &SourceChecker{store: st, releases: stubRelease{tag: "v1.2.3"}}
+	app := &config.App{
+		ID: "marller",
+		Source: config.Source{
+			Mode: config.SourceRelease,
+			Release: &config.ReleaseSource{
+				Repo: "Dragonshorn-Studios/marller", Asset: "marller-{tag}.tar.gz", ArchiveBinary: "marller",
+			},
+		},
+	}
+	res, err := checker.Check(context.Background(), app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Changed || res.Observed != "v1.2.3" {
+		t.Fatalf("res = %+v, want the unseen release owed", res)
+	}
+	if v, _, ok, _ := st.ObservedVersion(context.Background(), "marller", store.KindRelease); !ok || v != "v1.2.3" {
+		t.Fatalf("observed = %q ok=%v", v, ok)
+	}
+}
+
 func gitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

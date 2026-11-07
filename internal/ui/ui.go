@@ -279,6 +279,12 @@ func appMeta(app *config.App) string {
 			label = "Standalone · " + app.Deploy.Standalone.Name
 		}
 		parts = append(parts, label)
+	case config.DeployBinary:
+		label := "Go binary"
+		if app.Deploy.Binary != nil && app.Deploy.Binary.Unit != "" {
+			label = "Go binary · " + app.Deploy.Binary.Unit
+		}
+		parts = append(parts, label)
 	}
 	switch app.Source.Mode {
 	case config.SourceGit:
@@ -292,6 +298,10 @@ func appMeta(app *config.App) string {
 	case config.SourceRegistry:
 		if app.Source.Registry != nil && len(app.Source.Registry.Images) > 0 {
 			parts = append(parts, app.Source.Registry.Images[0].Ref)
+		}
+	case config.SourceRelease:
+		if app.Source.Release != nil {
+			parts = append(parts, app.Source.Release.Repo)
 		}
 	}
 	if app.DisplayName != "" && app.DisplayName != app.ID {

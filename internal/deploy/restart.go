@@ -43,6 +43,16 @@ func (r *Restarter) Restart(ctx context.Context, app *config.App) error {
 			return errors.New("app is not a standalone deployment")
 		}
 		return r.standaloneRestart(ctx, app)
+	case config.DeployBinary:
+		if app.Deploy.Binary == nil || app.Deploy.Binary.Unit == "" {
+			return errors.New("app is not a binary deployment")
+		}
+		return r.execChecked(ctx, runner.Request{
+			Name:    "systemctl --user restart",
+			Argv:    binaryRestartArgv(app.Deploy.Binary.Unit),
+			Timeout: appTimeout(app),
+			AppID:   app.ID,
+		})
 	default:
 		return fmt.Errorf("unsupported deploy mode %q", app.Deploy.Mode)
 	}

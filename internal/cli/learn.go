@@ -20,8 +20,10 @@ func (a *App) newLearnCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "learn",
 		Short: "Import local Docker/Compose apps into configuration",
-		Long: `Scan the local Docker state (read-only), present importable candidates,
-resolve required fields interactively, and preview a unified YAML diff.
+		Long: `Scan the local Docker state (read-only) and go-binary manifests
+(app.json, kind go-binary) one directory below the invoking user's home,
+present importable candidates, resolve required fields interactively, and
+preview a unified YAML diff.
 The configuration is written only after explicit confirmation: a timestamped
 backup is created and the file is replaced atomically after validation.
 learn never deploys, restarts, or changes Docker state.
@@ -78,6 +80,10 @@ learn never deploys, restarts, or changes Docker state.
 			if stdin == nil {
 				stdin = os.Stdin
 			}
+			home, homeErr := os.UserHomeDir()
+			if homeErr != nil {
+				home = ""
+			}
 			_, err = learn.RunFlow(cmd.Context(), learn.FlowOptions{
 				ConfigPath:    configPath,
 				DryRun:        dryRun,
@@ -88,6 +94,7 @@ learn never deploys, restarts, or changes Docker state.
 				Git:           git,
 				Stdin:         stdin,
 				Stdout:        cmd.OutOrStdout(),
+				Home:          home,
 			})
 			if errors.Is(err, learn.ErrDeclined) {
 				return nil // a clean decline; the flow already explained it

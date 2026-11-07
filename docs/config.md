@@ -105,7 +105,7 @@ Exactly one mode; the matching block is required and the other must be absent.
 
 ```yaml
 source:
-  mode: git            # or: registry
+  mode: git            # or: registry, or: release
   git:
     dir: /srv/ghost    # absolute path to the existing worktree
     branch: main       # required
@@ -126,6 +126,21 @@ source:
 - `mode: registry` tracks one or more image references via registry manifest
   digests (issue #10). Docker's configured credential helpers are used; a
   successful lookup is never treated as a deployment.
+
+```yaml
+source:
+  mode: release          # requires deploy.mode: binary
+  release:
+    repo: Dragonshorn-Studios/marller
+    asset: marller-{tag}-{os}-{arch}.tar.gz   # {tag} required; {os} and {arch} optional
+    archive_binary: marller                   # single member of the archive
+    token_ref: {env: GITHUB_TOKEN}            # optional; private releases only
+```
+
+- `mode: release` polls the GitHub releases API for the newest tag. The
+  deploy downloads that asset and `SHA256SUMS`, verifies the checksum, and
+  extracts `archive_binary`. A token is a secret reference resolved at
+  download time and is never logged. Public releases need no token.
 
 ### `deploy` — how updates are applied
 
@@ -162,6 +177,22 @@ deploy:
     work_dir: /app
     health_check: {test: ["CMD", "node", "health.js"], interval: 30s, timeout: 5s, retries: 3}
 ```
+
+```yaml
+deploy:
+  mode: binary          # requires source.mode: release
+  binary:
+    dir: /home/op/.marller    # absolute app home
+    bin: bin/marller          # relative; must stay inside dir
+    unit: marller             # systemd --user unit that owns the process
+```
+
+`mode: binary` replaces the file at `dir/bin` and runs
+`systemctl --user restart <unit>`. Yukariko does not supervise the process
+and does not execute the downloaded archive. The unit file (written by the
+app's installer) is the launch contract. Two apps cannot share a `dir`.
+Docker is not required for a binary app. Run Yukariko as the same user that
+owns the systemd user unit — `systemctl --user` addresses that user's bus.
 
 Every Compose invocation uses the configured work dir, files, env files,
 profiles, and project name **verbatim**. Yukariko never reconstructs ports,
@@ -369,6 +400,10 @@ endpoints: registering one asks Yukariko to POST state there, nothing more.
 
 Rejected with path-aware errors: unknown/duplicate fields, unsupported or
 missing `schema_version`, invalid durations, missing mode-specific blocks,
+a release source that is not deployed as a binary (and the reverse), an
+asset template that is not a filename or uses a placeholder other than
+`{tag}` `{os}` `{arch}`, a binary path that leaves its app home, a unit
+name that is not a systemd unit name,
 relative work dirs/paths, duplicate app IDs, duplicate step names within a
 list, two apps sharing a deploy target, invalid image refs/ports/binds,
 bad probe status ranges, literal secrets (they are not representable),

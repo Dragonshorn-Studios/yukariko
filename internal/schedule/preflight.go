@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -71,14 +72,17 @@ func (p *Preflight) Run(ctx context.Context, app *config.App) []Finding {
 		findings = append(findings, Finding{Check: check, Detail: fmt.Sprintf(format, args...)})
 	}
 
-	// Binaries: docker everywhere, git for git sources.
-	if _, err := p.look("docker"); err != nil {
-		add("binary:docker", "docker executable not found in PATH")
-	} else {
-		psArgv := append([]string{"docker"}, p.endpointFlags(app)...)
-		psArgv = append(psArgv, "ps")
-		if err := p.exec(ctx, "docker", psArgv); err != nil {
-			add("docker:reachable", "cannot reach the Docker daemon: %v", err)
+	// Docker is required for Compose and standalone apps. A release-installed
+	// Go binary has no daemon to reach.
+	if app.Deploy.Mode != config.DeployBinary {
+		if _, err := p.look("docker"); err != nil {
+			add("binary:docker", "docker executable not found in PATH")
+		} else {
+			psArgv := append([]string{"docker"}, p.endpointFlags(app)...)
+			psArgv = append(psArgv, "ps")
+			if err := p.exec(ctx, "docker", psArgv); err != nil {
+				add("docker:reachable", "cannot reach the Docker daemon: %v", err)
+			}
 		}
 	}
 	if app.Source.Mode == config.SourceGit {
@@ -92,6 +96,8 @@ func (p *Preflight) Run(ctx context.Context, app *config.App) []Finding {
 		p.checkCompose(ctx, app, add)
 	case config.DeployStandalone:
 		p.checkStandalone(app, add)
+	case config.DeployBinary:
+		p.checkBinary(app, add)
 	case "":
 		add("deploy.mode", "deploy mode is unset")
 	}
@@ -163,6 +169,37 @@ func (p *Preflight) checkCompose(ctx context.Context, app *config.App, add func(
 	}
 	if c.ProjectName != "" && !composeProjectPattern.MatchString(c.ProjectName) {
 		add("value:project_name", "project name %q must match %s", c.ProjectName, composeProjectPattern)
+	}
+}
+
+func (p *Preflight) checkBinary(app *config.App, add func(string, string, ...any)) {
+	b := app.Deploy.Binary
+	if b == nil {
+		add("deploy.binary", "binary mode selected but binary section is missing")
+		return
+	}
+	if b.Dir == "" {
+		add("path:binary_dir", "binary app directory is unset")
+	} else if fi, err := os.Stat(b.Dir); err != nil {
+		add("path:binary_dir", "binary app directory %s: %v", b.Dir, err)
+	} else if !fi.IsDir() {
+		add("path:binary_dir", "%s is not a directory", b.Dir)
+	}
+	if b.Bin == "" {
+		add("path:binary", "binary path is unset")
+	} else if b.Dir != "" {
+		dest := filepath.Join(b.Dir, filepath.FromSlash(b.Bin))
+		if fi, err := os.Stat(dest); err != nil {
+			add("path:binary", "binary %s: %v", dest, err)
+		} else if fi.IsDir() {
+			add("path:binary", "%s is a directory", dest)
+		}
+	}
+	if b.Unit == "" {
+		add("value:unit", "systemd user unit name is unset")
+	}
+	if _, err := p.look("systemctl"); err != nil {
+		add("binary:systemctl", "systemctl executable not found in PATH")
 	}
 }
 

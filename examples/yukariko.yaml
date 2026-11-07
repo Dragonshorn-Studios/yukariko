@@ -120,3 +120,23 @@ apps:
         ports:
           - 127.0.0.1:3001:3001
         restart: unless-stopped
+
+  # Release-installed Go binary. The systemd user unit owns the process.
+  # `yukariko learn` imports ~/.marller/app.json (kind: go-binary) into this shape.
+  # - id: marller
+  #   source:
+  #     mode: release
+  #     release:
+  #       repo: Dragonshorn-Studios/marller
+  #       asset: "marller-{tag}-{os}-{arch}.tar.gz"
+  #       archive_binary: marller
+  #       token_ref: {env: GITHUB_TOKEN}   # omit for a public release
+  #   deploy:
+  #     mode: binary
+  #     binary:
+  #       dir: /home/op/.marller
+  #       bin: bin/marller
+  #       unit: marller
+  #   health:
+  #     http:
+  #       url: http://127.0.0.1:8080/health/live

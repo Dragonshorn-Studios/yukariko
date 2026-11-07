@@ -10,8 +10,9 @@ import (
 
 // Observation kinds recorded separately from deployed versions.
 const (
-	KindGitSHA = "git_sha"
-	KindDigest = "digest"
+	KindGitSHA  = "git_sha"
+	KindDigest  = "digest"
+	KindRelease = "release"
 )
 
 // RecordObservation stores the latest observed source version for an app.

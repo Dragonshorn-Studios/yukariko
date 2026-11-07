@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -21,6 +22,8 @@ var (
 	sha256Pattern     = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	platformPattern   = regexp.MustCompile(`^[A-Za-z0-9]+(?:/[A-Za-z0-9]+){0,2}$`)
 	bindModePattern   = regexp.MustCompile(`^(ro|rw|z|Z)(?:,(ro|rw|z|Z))*$`)
+	repoPattern       = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	unitPattern       = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9:_.@-]{0,62}$`)
 )
 
 // Validate checks the fully-defaulted configuration and returns all findings.
@@ -148,8 +151,35 @@ func validateSource(v *validator, path string, a *App) {
 				v.errorf(ip+".platform", "must look like \"linux/arm64\", got %q", img.Platform)
 			}
 		}
+	case SourceRelease:
+		if a.Source.Git != nil {
+			v.errorf(sp+".git", "must not be set when source.mode is %q", SourceRelease)
+		}
+		if a.Source.Registry != nil {
+			v.errorf(sp+".registry", "must not be set when source.mode is %q", SourceRelease)
+		}
+		r := a.Source.Release
+		if r == nil {
+			v.errorf(sp+".release", "is required when source.mode is %q", SourceRelease)
+			return
+		}
+		if !repoPattern.MatchString(r.Repo) {
+			v.errorf(sp+".release.repo", "must be owner/name, got %q", r.Repo)
+		}
+		if msg := validReleaseAsset(r.Asset); msg != "" {
+			v.errorf(sp+".release.asset", "%s", msg)
+		}
+		if !namePattern.MatchString(r.ArchiveBinary) || strings.Contains(r.ArchiveBinary, "/") {
+			v.errorf(sp+".release.archive_binary", "must be a single filename, got %q", r.ArchiveBinary)
+		}
+		if r.TokenRef != nil {
+			validateSecretRef(v, sp+".release.token_ref", r.TokenRef)
+		}
+		if a.Deploy.Mode != DeployBinary {
+			v.errorf(sp+".mode", "release sources deploy as %q", DeployBinary)
+		}
 	default:
-		v.errorf(sp+".mode", "must be %q or %q, got %q", SourceGit, SourceRegistry, a.Source.Mode)
+		v.errorf(sp+".mode", "must be %q, %q, or %q, got %q", SourceGit, SourceRegistry, SourceRelease, a.Source.Mode)
 	}
 }
 
@@ -199,8 +229,32 @@ func validateDeploy(v *validator, path string, a *App) {
 			return
 		}
 		validateStandalone(v, dp+".standalone", s)
+	case DeployBinary:
+		if a.Deploy.Compose != nil {
+			v.errorf(dp+".compose", "must not be set when deploy.mode is %q", DeployBinary)
+		}
+		if a.Deploy.Standalone != nil {
+			v.errorf(dp+".standalone", "must not be set when deploy.mode is %q", DeployBinary)
+		}
+		if a.Source.Mode != SourceRelease {
+			v.errorf(dp+".mode", "binary deployment requires source.mode %q", SourceRelease)
+		}
+		b := a.Deploy.Binary
+		if b == nil {
+			v.errorf(dp+".binary", "is required when deploy.mode is %q", DeployBinary)
+			return
+		}
+		if !isAbsPath(b.Dir) {
+			v.errorf(dp+".binary.dir", "must be an absolute path to the app home, got %q", b.Dir)
+		}
+		if !validRelativePath(b.Bin) {
+			v.errorf(dp+".binary.bin", "must be a relative path inside the app home, got %q", b.Bin)
+		}
+		if !unitPattern.MatchString(b.Unit) {
+			v.errorf(dp+".binary.unit", "must be a systemd unit name, got %q", b.Unit)
+		}
 	default:
-		v.errorf(dp+".mode", "must be %q or %q, got %q", DeployCompose, DeployStandalone, a.Deploy.Mode)
+		v.errorf(dp+".mode", "must be %q, %q, or %q, got %q", DeployCompose, DeployStandalone, DeployBinary, a.Deploy.Mode)
 	}
 }
 
@@ -526,9 +580,52 @@ func deployTargetKey(a *App) (string, bool) {
 			return "", false
 		}
 		return "standalone:" + a.Deploy.Standalone.Name, true
+	case DeployBinary:
+		if a.Deploy.Binary == nil {
+			return "", false
+		}
+		return "binary:" + path.Clean(bSlash(a.Deploy.Binary.Dir)), true
 	default:
 		return "", false
 	}
+}
+
+// bSlash keeps deploy-target identity stable on Windows, where filepath
+// would rewrite a POSIX app home.
+func bSlash(p string) string {
+	return strings.ReplaceAll(p, "\\", "/")
+}
+
+func validRelativePath(p string) bool {
+	if p == "" || strings.Contains(p, `\`) || strings.HasPrefix(p, "/") {
+		return false
+	}
+	clean := path.Clean(p)
+	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
+func validReleaseAsset(asset string) string {
+	if asset == "" {
+		return "is required"
+	}
+	if strings.Contains(asset, "/") || strings.Contains(asset, `\`) || strings.Contains(asset, "..") {
+		return "must be a filename template without a path"
+	}
+	if !strings.Contains(asset, "{tag}") {
+		return "must contain {tag}"
+	}
+	rest := strings.NewReplacer("{tag}", "", "{os}", "", "{arch}", "").Replace(asset)
+	if strings.ContainsAny(rest, "{}") {
+		return "may only use the placeholders {tag}, {os}, and {arch}"
+	}
+	for _, r := range rest {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+		default:
+			return fmt.Sprintf("contains %q; only letters, digits, and ._- are allowed besides placeholders", string(r))
+		}
+	}
+	return ""
 }
 
 // isAbsPath accepts POSIX-style absolute paths on every platform so configs
