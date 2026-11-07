@@ -25,6 +25,8 @@ With a Go toolchain: `go install github.com/Dragonshorn-Studios/yukariko/cmd/yuk
 
 Manually: download `yukariko-<version>-linux-<arch>.tar.gz` and `SHA256SUMS` from the [Releases page](https://github.com/Dragonshorn-Studios/yukariko/releases), verify with `sha256sum -c --ignore-missing`, unpack, and install to `/usr/local/bin/yukariko` (full walkthrough in [`docs/operations.md`](docs/operations.md)).
 
+To update later, re-run the same installer — it is idempotent and never overwrites your config — then `sudo systemctl restart yukariko` ([details](docs/operations.md#updating-yukariko)).
+
 ## Build
 
 Windows:
